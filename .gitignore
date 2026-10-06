@@ -1,0 +1,16 @@
+# Godot import cache (regenerated on CI)
+/.godot/
+
+# Godot-generated Android Gradle project (regenerated on export)
+/android/
+
+# Build outputs
+/builds/
+
+# Release keystore (use GitHub Secrets in CI, never commit)
+/keystore/
+
+# OS / editor junk
+.DS_Store
+*.tmp
+*.log
