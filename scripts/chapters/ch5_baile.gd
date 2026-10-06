@@ -47,6 +47,7 @@ var _t := 0.0
 var _built := false
 
 var _dancers: Array = []
+var _ghosts: Array = []
 var _leader: Node3D = null
 var _leader_body: Node3D = null
 var _leader_arm_l: Node3D = null
@@ -134,8 +135,8 @@ func _build_world() -> void:
 	_world.name = "Diorama"
 	add_child(_world)
 
-	# Marigold field ring around the plaza (hidden in AR).
-	var field := MarigoldFX.make_marigold_field(_world, 260, 9.0)
+	# Marigold field ring around the plaza (hidden in AR): real flowers (Kenney CC0).
+	var field := MarigoldModels.make_flower_field(_world, 200, 9.0, 555)
 	field.position = STAGE_CENTER
 	_ar_hidden.append(field)
 
@@ -158,6 +159,18 @@ func _build_world() -> void:
 
 	# Ambient motes stay in both modes.
 	MarigoldFX.spawn_ambient_motes(_world, Vector3(0, 1.8, -3.0), 4.5, 60)
+
+	# Floating spirit guests (Kenney CC0 ghosts) drifting above the plaza.
+	for gi in 4:
+		var ghost := MarigoldModels.instance(MarigoldModels.GRAVEYARD, "character-ghost")
+		if ghost == null:
+			continue
+		MarigoldModels.recolor_glow(ghost, Color(0.75, 0.85, 1.0), Color(0.55, 0.75, 1.0), 1.2)
+		var ga := TAU * float(gi) / 4.0 + 0.4
+		ghost.position = Vector3(cos(ga) * 5.2, 2.6 + float(gi % 2) * 0.7, -3.0 + sin(ga) * 5.2)
+		ghost.scale = Vector3.ONE * 1.8
+		_world.add_child(ghost)
+		_ghosts.append({"node": ghost, "phase": ga, "base_y": ghost.position.y})
 
 
 func _build_stage() -> void:
@@ -300,7 +313,66 @@ func _build_plaque() -> void:
 
 ## ---- Skeleton builder (original festive designs) ----
 
+## v0.2.0: crowd dancer built on the real Kenney skeleton model (CC0).
+## Whole-body dance animation (bob/sway/spin); no arm pivots needed.
+func _make_model_dancer(accent: Color, dancer_scale: float) -> Dictionary:
+	var root := Node3D.new()
+	root.name = "Celebrant"
+	var skel := MarigoldModels.instance(MarigoldModels.GRAVEYARD, "character-skeleton")
+	var body := Node3D.new()
+	body.name = "Body"
+	root.add_child(body)
+	if skel != null:
+		# Bone-white with a warm tint; the model's own textures get overridden
+		# for a consistent calavera look.
+		MarigoldModels.recolor(skel, Color(0.93, 0.87, 0.74), 0.0, 0.55)
+		body.add_child(skel)
+		# Glowing marigold eyes (model space: head near the top).
+		var eye_m := MarigoldFX.glow(Color(1.0, 0.60, 0.12), 2.6)
+		for sx in [-1.0, 1.0]:
+			var eye := MeshInstance3D.new()
+			var em := SphereMesh.new()
+			em.radius = 0.022
+			em.height = 0.04
+			eye.mesh = em
+			eye.material_override = eye_m
+			eye.position = Vector3(0.055 * sx, 0.615, 0.105)
+			skel.add_child(eye)
+		# Marigold garland around the neck (model space).
+		for gi in 8:
+			var ga := TAU * float(gi) / 8.0
+			var bead := MeshInstance3D.new()
+			var gm := SphereMesh.new()
+			gm.radius = 0.020
+			gm.height = 0.035
+			bead.mesh = gm
+			bead.material_override = MarigoldFX.glow(Color(1.0, 0.60, 0.10), 2.0) if gi % 2 == 0 else MarigoldFX.pbr(accent, 0.1, 0.5)
+			bead.position = Vector3(cos(ga) * 0.115, 0.50, sin(ga) * 0.115)
+			skel.add_child(bead)
+		# Accent sash: glowing band across the ribcage.
+		var sash := MeshInstance3D.new()
+		var sm := TorusMesh.new()
+		sm.inner_radius = 0.13
+		sm.outer_radius = 0.16
+		sm.rings = 20
+		sm.ring_segments = 8
+		sash.mesh = sm
+		sash.material_override = MarigoldFX.glow(accent, 1.4)
+		sash.position = Vector3(0, 0.38, 0)
+		sash.rotation_degrees.x = 12.0
+		skel.add_child(sash)
+	# Scale the 0.72m model up to dancer height.
+	body.scale = Vector3.ONE * 2.64
+	root.scale = Vector3.ONE * dancer_scale
+	return {"root": root, "body": body, "arm_l": null, "arm_r": null}
+
+
 func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dictionary:
+	# v0.2.0: crowd dancers use the real Kenney skeleton model (CC0) -
+	# no more sphere-stack blobs. The leader keeps its articulated arms
+	# (the copy-me game needs animated arm poses).
+	if not is_leader:
+		return _make_model_dancer(accent, dancer_scale)
 	var root := Node3D.new()
 	root.name = "Celebrant"
 	var bone := MarigoldFX.pbr(Color(0.93, 0.88, 0.76), 0.0, 0.55)
@@ -486,6 +558,7 @@ func _process(delta: float) -> void:
 	_update_dancers(delta)
 	_update_leader(delta)
 	_update_candles()
+	_update_ghosts(delta)
 
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)
@@ -588,6 +661,7 @@ func _move_gentle_pass() -> void:
 	_label_move.text = "Muy bien!"
 	_label_hint.text = "Next move!"
 	MarigoldFX.scatter_petals(_world, _leader.global_position + Vector3(0, 1.8, 0), 24)
+	MarigoldHaptics.fanfare()
 
 
 func _advance() -> void:
@@ -679,6 +753,16 @@ func _wave_range() -> float:
 	return mx - mn
 
 
+func _update_ghosts(delta: float) -> void:
+	for g in _ghosts:
+		var node: Node3D = g["node"]
+		if not is_instance_valid(node):
+			continue
+		var ph: float = g["phase"]
+		node.position.y = float(g["base_y"]) + sin(_t * 1.1 + ph) * 0.25
+		node.rotation.y += delta * 0.35
+
+
 func _pose_matches(id: int) -> bool:
 	var h := _hand_refs()
 	match id:
@@ -722,11 +806,13 @@ func _update_dancers(delta: float) -> void:
 			_: # spin
 				root.position.y = float(d["base_y"]) + absf(sin(t)) * 0.08 + hop
 				root.rotation.y += delta * 1.6
-		# Arm groove.
+		# Arm groove (model dancers have no arm pivots - whole body dances).
 		var al: Node3D = d["arm_l"]
 		var ar: Node3D = d["arm_r"]
-		al.rotation.z = -0.5 - absf(sin(t)) * 0.5
-		ar.rotation.z = 0.5 + absf(sin(t + 1.3)) * 0.5
+		if al != null and is_instance_valid(al):
+			al.rotation.z = -0.5 - absf(sin(t)) * 0.5
+		if ar != null and is_instance_valid(ar):
+			ar.rotation.z = 0.5 + absf(sin(t + 1.3)) * 0.5
 
 
 func _update_leader(delta: float) -> void:

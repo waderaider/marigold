@@ -415,11 +415,23 @@ static func make_night_sky(parent: Node) -> WorldEnvironment:
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.35
+	env.ambient_light_energy = 0.45
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.15
+	env.tonemap_white = 1.2
+	# Vivid "HDR" look for Quest 3 (no true HDR panel): strong bloom on all
+	# emissives, boosted intensities, saturated colors.
 	env.glow_enabled = true
-	env.glow_intensity = 0.8
-	env.glow_strength = 1.2
+	env.glow_intensity = 1.1
+	env.glow_strength = 1.45
+	env.glow_bloom = 0.35
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	# Depth cueing: subtle exponential fog in marigold orange-teal.
+	env.fog_enabled = true
+	env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+	env.fog_density = 0.028
+	env.fog_light_color = Color(0.45, 0.18, 0.35)
+	env.fog_sky_affect = 0.35
 	we.environment = env
 	parent.add_child(we)
 	return we

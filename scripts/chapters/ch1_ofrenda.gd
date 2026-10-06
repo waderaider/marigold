@@ -548,21 +548,21 @@ func _build_marigold_arch() -> void:
 		arch.add_child(pmi)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
-	var orange := MarigoldFX.glow(Color(1.0, 0.55, 0.08), 1.7)
-	var yellow := MarigoldFX.glow(Color(1.0, 0.80, 0.20), 1.7)
+	var flower_kinds := ["flower_redA", "flower_redB", "flower_yellowA", "flower_yellowB"]
 	var leaf := MarigoldFX.pbr(Color(0.12, 0.35, 0.12), 0.0, 0.9)
 	for i in 26:
 		var t := float(i) / 25.0
 		var pos := Vector3(cos(PI * t) * 1.35, 2.3 + sin(PI * t) * 1.05, 0)
-		var bl := SphereMesh.new()
-		bl.radius = 0.075
-		bl.height = 0.11
-		var bmi := MeshInstance3D.new()
-		bmi.mesh = bl
-		bmi.material_override = orange if i % 2 == 0 else yellow
-		bmi.position = pos + Vector3(
-			rng.randf_range(-0.03, 0.03), rng.randf_range(-0.03, 0.03), rng.randf_range(-0.05, 0.05))
-		arch.add_child(bmi)
+		# Real marigold flower model (Kenney CC0), glowing orange.
+		var blossom := MarigoldModels.instance(MarigoldModels.NATURE, flower_kinds[i % flower_kinds.size()])
+		if blossom != null:
+			MarigoldModels.recolor_glow(blossom, Color(1.0, 0.55, 0.10), Color(1.0, 0.50, 0.08), 1.9)
+			blossom.position = pos + Vector3(
+				rng.randf_range(-0.03, 0.03), rng.randf_range(-0.03, 0.03), rng.randf_range(-0.05, 0.05))
+			var bs := rng.randf_range(1.6, 2.4)
+			blossom.scale = Vector3.ONE * bs
+			blossom.rotation.y = rng.randf() * TAU
+			arch.add_child(blossom)
 		if i % 3 == 0:
 			var lf := SphereMesh.new()
 			lf.radius = 0.05
@@ -572,6 +572,11 @@ func _build_marigold_arch() -> void:
 			lmi.material_override = leaf
 			lmi.position = pos + Vector3(0, -0.10, 0.02)
 			arch.add_child(lmi)
+	# Stone altar dressing flanking the arch (Kenney CC0).
+	for sx in [-1.0, 1.0]:
+		var altar := MarigoldModels.place(arch, MarigoldModels.GRAVEYARD, "altar-stone", Vector3(sx * 1.85, 0, 0.35), sx * 18.0, 0.9)
+		if altar != null:
+			MarigoldModels.recolor(altar, Color(0.52, 0.48, 0.55), 0.05, 0.85)
 
 
 ## Marigold garlands swagged across each tier's front edge.
@@ -581,22 +586,25 @@ func _build_garlands() -> void:
 		{"w": 1.78, "top": 0.90, "z": 0.51},
 		{"w": 1.28, "top": 1.30, "z": 0.41},
 	]
-	var orange := MarigoldFX.glow(Color(1.0, 0.60, 0.10), 1.8)
-	var yellow := MarigoldFX.glow(Color(1.0, 0.78, 0.18), 1.8)
+	var flower_kinds := ["flower_redA", "flower_yellowA", "flower_redB", "flower_yellowB"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
 	for tier in tiers:
 		var w: float = tier["w"]
 		var top: float = tier["top"]
 		var z: float = tier["z"]
 		for i in 13:
 			var t := float(i) / 12.0
-			var bl := SphereMesh.new()
-			bl.radius = 0.036
-			bl.height = 0.05
-			var bmi := MeshInstance3D.new()
-			bmi.mesh = bl
-			bmi.material_override = orange if i % 2 == 0 else yellow
-			bmi.position = Vector3(lerpf(-w * 0.5, w * 0.5, t), top + 0.015 - sin(t * PI) * 0.085, z)
-			_ofrenda.add_child(bmi)
+			# Real marigold flower model (Kenney CC0) swagged along the edge.
+			var blossom := MarigoldModels.instance(MarigoldModels.NATURE, flower_kinds[i % flower_kinds.size()])
+			if blossom == null:
+				continue
+			MarigoldModels.recolor_glow(blossom, Color(1.0, 0.60, 0.10), Color(1.0, 0.55, 0.08), 2.0)
+			blossom.position = Vector3(lerpf(-w * 0.5, w * 0.5, t), top + 0.03 - sin(t * PI) * 0.085, z)
+			blossom.rotation.y = rng.randf() * TAU
+			var bs := rng.randf_range(0.9, 1.3)
+			blossom.scale = Vector3.ONE * bs
+			_ofrenda.add_child(blossom)
 
 
 ## Scattered fallen petals around the ofrenda base.
@@ -683,7 +691,7 @@ func _build_backdrop() -> void:
 	_backdrop.name = "Backdrop"
 	_backdrop.position = _stage_home
 	add_child(_backdrop)
-	MarigoldFX.make_marigold_field(_backdrop, 260, 8.0)
+	MarigoldModels.make_flower_field(_backdrop, 200, 8.0, 314)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, 0), 8.0)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(-3.5, 0, -1.5), 8.0, Color(1.0, 0.5, 0.7))
 	var b1 := MarigoldFX.make_papel_banner(_backdrop, 4.0, 1.1, Color(1.0, 0.35, 0.55))
@@ -692,6 +700,11 @@ func _build_backdrop() -> void:
 	b2.position = Vector3(2.2, 2.8, -3.6)
 	_build_papel_strings()
 	MarigoldFX.spawn_ambient_motes(_backdrop, Vector3(0, 1.6, 0), 4.5, 80)
+	# Graveyard fence dressing (Kenney CC0) framing the scene.
+	for fx in [-3.2, 3.2]:
+		var fence := MarigoldModels.place(_backdrop, MarigoldModels.GRAVEYARD, "fence", Vector3(fx, 0, -2.2), 90.0 if fx < 0 else -90.0, 1.4)
+		if fence != null:
+			MarigoldModels.recolor(fence, Color(0.30, 0.26, 0.32), 0.1, 0.8)
 
 
 ## Strings of small papel picado banners strung above the ofrenda.
@@ -881,6 +894,7 @@ func _light_candle(idx: int) -> void:
 		MarigoldFX.make_point_light(_candles[idx], Vector3(0, 0.38, 0), Color(1.0, 0.62, 0.25), 0.9, 3.5)
 		_lights_used += 1
 	MarigoldFX.spawn_sparks(self, _candles[idx].global_position + Vector3(0, 0.3, 0), Color(1.0, 0.7, 0.2), 12)
+	MarigoldHaptics.thump()
 	_sfx(48, 0.8, 1.6)
 	_sfx(55, 0.5, 1.2)
 	_toast("Candle lit — %d of 5" % _candles_lit_count)
@@ -1018,6 +1032,7 @@ func _place_petal(local: Vector3) -> void:
 	_held.position = _petal_slots[slot]
 	_held.rotation.y = randf() * TAU
 	MarigoldFX.spawn_sparks(self, _ofrenda.to_global(_petal_slots[slot]), Color(1.0, 0.7, 0.2), 10)
+	MarigoldHaptics.click()
 	var petal_notes := [60, 62, 64, 67, 69, 72]
 	_sfx(petal_notes[_petals_placed - 1], 0.7, 1.0)
 	_toast("Petal placed — %d of 6" % _petals_placed)
@@ -1039,6 +1054,7 @@ func _place_frame(idx: int) -> void:
 	_held.position = _frame_slots[slot]
 	_held.rotation = Vector3(deg_to_rad(-6.0), 0, 0)
 	MarigoldFX.spawn_sparks(self, _ofrenda.to_global(_frame_slots[slot] + Vector3(0, 0.3, 0)), Color(1.0, 0.8, 0.4), 10)
+	MarigoldHaptics.thump()
 	var frame_notes := [65, 69, 72]
 	_sfx(frame_notes[_frames_placed - 1], 0.7, 1.2)
 	_toast("Photo placed — %d of 3" % _frames_placed)
@@ -1072,6 +1088,7 @@ func _celebrate() -> void:
 	for top_y in [0.55, 0.95, 1.35]:
 		MarigoldFX.scatter_petals(self, _ofrenda.to_global(Vector3(0, top_y, 0)), 40)
 	MarigoldFX.spawn_confetti(self, _ofrenda.to_global(Vector3(0, 1.8, 0)), 70)
+	MarigoldHaptics.fanfare()
 	# Second beat: spirit butterflies rise from the arch as the flames surge.
 	await get_tree().create_timer(1.0).timeout
 	MarigoldFX.scatter_petals(self, _ofrenda.to_global(Vector3(0, 3.3, -0.78)), 50)

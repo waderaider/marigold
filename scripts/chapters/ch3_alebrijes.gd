@@ -145,34 +145,40 @@ func _build_plaza() -> void:
 	disc_mi.position.y = -0.06
 	_ground_group.add_child(disc_mi)
 
-	MarigoldFX.make_marigold_field(_ground_group, 260, 9.5)
+	MarigoldModels.make_flower_field(_ground_group, 200, 9.5, 777)
 
-	# Fountain of glowing water at the plaza center.
+	# Fountain of glowing water at the plaza center: real carved fountain (Kenney CC0).
 	var fountain := Node3D.new()
 	fountain.name = "Fountain"
 	fountain.position = Vector3(0, 0, -1.0)
 	_ground_group.add_child(fountain)
-	var basin := CylinderMesh.new()
-	basin.top_radius = 1.15
-	basin.bottom_radius = 0.95
-	basin.height = 0.55
-	basin.radial_segments = 32
-	var basin_mi := MeshInstance3D.new()
-	basin_mi.mesh = basin
-	basin_mi.material_override = MarigoldFX.pbr(Color(0.25, 0.12, 0.20), 0.4, 0.35)
-	basin_mi.position.y = 0.27
-	fountain.add_child(basin_mi)
+	var fountain_m := MarigoldModels.instance(MarigoldModels.FANTASY, "fountain-center")
+	if fountain_m != null:
+		MarigoldModels.recolor(fountain_m, Color(0.35, 0.22, 0.38), 0.4, 0.35)
+		fountain_m.scale = Vector3.ONE * 1.6
+		fountain.add_child(fountain_m)
+	else:
+		var basin := CylinderMesh.new()
+		basin.top_radius = 1.15
+		basin.bottom_radius = 0.95
+		basin.height = 0.55
+		basin.radial_segments = 32
+		var basin_mi := MeshInstance3D.new()
+		basin_mi.mesh = basin
+		basin_mi.material_override = MarigoldFX.pbr(Color(0.25, 0.12, 0.20), 0.4, 0.35)
+		basin_mi.position.y = 0.27
+		fountain.add_child(basin_mi)
+		var column := CylinderMesh.new()
+		column.top_radius = 0.09
+		column.bottom_radius = 0.14
+		column.height = 0.9
+		var col_mi := MeshInstance3D.new()
+		col_mi.mesh = column
+		col_mi.material_override = MarigoldFX.pbr(Color(0.30, 0.15, 0.25), 0.4, 0.35)
+		col_mi.position.y = 0.9
+		fountain.add_child(col_mi)
 	var water := MarigoldFX.make_luminous_water(fountain, 2.0)
 	water.position.y = 0.58
-	var column := CylinderMesh.new()
-	column.top_radius = 0.09
-	column.bottom_radius = 0.14
-	column.height = 0.9
-	var col_mi := MeshInstance3D.new()
-	col_mi.mesh = column
-	col_mi.material_override = MarigoldFX.pbr(Color(0.30, 0.15, 0.25), 0.4, 0.35)
-	col_mi.position.y = 0.9
-	fountain.add_child(col_mi)
 	var orb_top := SphereMesh.new()
 	orb_top.radius = 0.14
 	orb_top.height = 0.28
@@ -516,6 +522,38 @@ func _build_guide(def: Dictionary, idx: int) -> Dictionary:
 	tail_mi.position = Vector3(0, 0.08, 0.25)
 	tail_mi.rotation.x = -0.5
 	tail.add_child(tail_mi)
+
+	# Alebrije folk-art detailing: glowing dorsal ridge + painted flank spots.
+	# (v0.2.0: rich surface detail over the base body.)
+	var ridge_mat := MarigoldFX.glow(accent, 2.2)
+	for ri in 5:
+		var spike := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.008
+		sm.bottom_radius = 0.035
+		sm.height = 0.14
+		sm.radial_segments = 6
+		spike.mesh = sm
+		spike.material_override = ridge_mat
+		var rt := float(ri) / 4.0
+		spike.position = Vector3(0, 0.86 + sin(rt * PI) * 0.10, lerpf(0.30, -0.34, rt))
+		spike.rotation_degrees.x = lerpf(-28.0, 28.0, rt)
+		root.add_child(spike)
+	var spot_mat := MarigoldFX.glow(accent, 1.6)
+	var spot_rng := RandomNumberGenerator.new()
+	spot_rng.seed = 1000 + idx * 77
+	for si in 14:
+		var spot := MeshInstance3D.new()
+		var spm := SphereMesh.new()
+		spm.radius = 0.035
+		spm.height = 0.05
+		spot.mesh = spm
+		spot.material_override = spot_mat
+		var sa := spot_rng.randf() * TAU
+		var sy := spot_rng.randf_range(0.48, 0.82)
+		spot.position = Vector3(cos(sa) * 0.30, sy, sin(sa) * 0.40)
+		spot.scale = Vector3(1.0, 1.0, 0.45)
+		root.add_child(spot)
 
 	match feature:
 		"moth_wings":
@@ -1050,6 +1088,7 @@ func _on_orb_arrived(g: Dictionary, orb: Node3D) -> void:
 	var col: Color = (g["def"] as Dictionary)["glow"]
 	MarigoldFX.spawn_sparks(self, pos, col, 30)
 	MarigoldFX.scatter_petals(self, pos, 24)
+	MarigoldHaptics.thump()
 	g["hop_t"] = 0.0
 	g["joy_t"] = 0.9 # spin + squash-and-stretch celebration
 	if MarigoldState.music != null:

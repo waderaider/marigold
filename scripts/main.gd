@@ -90,8 +90,8 @@ func _build_title() -> void:
 	_title_root.position = Vector3(0, 0, -2.5)
 	add_child(_title_root)
 
-	# Marigold field + god rays for the wow backdrop.
-	MarigoldFX.make_marigold_field(_title_root, 260, 10.0)
+	# Marigold field + god rays for the wow backdrop: real flowers (Kenney CC0).
+	MarigoldModels.make_flower_field(_title_root, 200, 10.0, 2026)
 	MarigoldFX.make_god_ray(_title_root, Vector3(0, 0, -3), 9.0)
 	MarigoldFX.make_god_ray(_title_root, Vector3(-4, 0, -5), 9.0, Color(1.0, 0.5, 0.7))
 	MarigoldFX.spawn_ambient_motes(_title_root, Vector3(0, 1.5, 0), 4.0, 60)

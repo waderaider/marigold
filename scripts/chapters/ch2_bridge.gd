@@ -186,8 +186,8 @@ func _build() -> void:
 	add_child(_backdrop)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, -BRIDGE_LENGTH * 0.5 - 0.5), 9.0)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, 2.5), 9.0, Color(1.0, 0.5, 0.7))
-	MarigoldFX.make_marigold_field(_backdrop, 120, 5.0).position = Vector3(-4.5, -0.4, -6.0)
-	MarigoldFX.make_marigold_field(_backdrop, 120, 5.0).position = Vector3(4.5, -0.4, -12.0)
+	MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 11).position = Vector3(-4.5, -0.4, -6.0)
+	MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 22).position = Vector3(4.5, -0.4, -12.0)
 	MarigoldFX.spawn_ambient_motes(_backdrop, Vector3(0, 2.0, -9.0), 4.0, 50)
 
 	# Layered dressing: fireflies, petal drift, city, blossoms.
@@ -243,8 +243,8 @@ func _layout_bridge() -> void:
 		rail_mi.position = Vector3(rx, 0.05, -BRIDGE_LENGTH * 0.5 + 2.0)
 		_bridge.add_child(rail_mi)
 
-	# Marigold strip down the center of the deck.
-	var strip := MarigoldFX.make_marigold_field(_bridge, 150, 0.85)
+	# Marigold strip down the center of the deck: real flowers (Kenney CC0).
+	var strip := MarigoldModels.make_flower_field(_bridge, 90, 0.85, 33)
 	strip.position = Vector3(0, 0.05, -BRIDGE_LENGTH * 0.5 + 2.0)
 
 	# Start arch (decorative) and 5 waypoint rings.
@@ -287,14 +287,22 @@ func _make_stone_arch(pos: Vector3, is_exit: bool) -> Node3D:
 	root.name = "FarArch" if is_exit else "StartArch"
 	root.position = pos
 	var stone := MarigoldFX.pbr(Color(0.45, 0.42, 0.48), 0.05, 0.85)
+	# Real carved stone pillars (Kenney CC0) instead of boxes.
 	for px in [-1.5, 1.5]:
-		var pillar := BoxMesh.new()
-		pillar.size = Vector3(0.6, 3.4, 0.6)
-		var pmi := MeshInstance3D.new()
-		pmi.mesh = pillar
-		pmi.material_override = stone
-		pmi.position = Vector3(px, 1.7, 0)
-		root.add_child(pmi)
+		var pillar_m := MarigoldModels.instance(MarigoldModels.FANTASY, "pillar-stone")
+		if pillar_m != null:
+			MarigoldModels.recolor(pillar_m, Color(0.48, 0.44, 0.52), 0.05, 0.85)
+			pillar_m.position = Vector3(px, 0, 0)
+			pillar_m.scale = Vector3(1.6, 2.6, 1.6)
+			root.add_child(pillar_m)
+		else:
+			var pillar := BoxMesh.new()
+			pillar.size = Vector3(0.6, 3.4, 0.6)
+			var pmi := MeshInstance3D.new()
+			pmi.mesh = pillar
+			pmi.material_override = stone
+			pmi.position = Vector3(px, 1.7, 0)
+			root.add_child(pmi)
 	var beam := BoxMesh.new()
 	beam.size = Vector3(3.8, 0.6, 0.7)
 	var bmi := MeshInstance3D.new()
@@ -302,14 +310,8 @@ func _make_stone_arch(pos: Vector3, is_exit: bool) -> Node3D:
 	bmi.material_override = stone
 	bmi.position = Vector3(0, 3.6, 0)
 	root.add_child(bmi)
-	# Marigold trim across the beam.
-	var trim := BoxMesh.new()
-	trim.size = Vector3(3.85, 0.12, 0.75)
-	var tmi := MeshInstance3D.new()
-	tmi.mesh = trim
-	tmi.material_override = MarigoldFX.glow(Color(1.0, 0.60, 0.10), 1.5)
-	tmi.position = Vector3(0, 3.32, 0)
-	root.add_child(tmi)
+	# Marigold trim across the beam: real flowers (Kenney CC0).
+	MarigoldModels.make_flower_row(root, Vector3(-1.9, 3.32, 0), Vector3(1.9, 3.32, 0), 10, 7 if is_exit else 8)
 	if is_exit:
 		# Extra glow marks the exit.
 		var halo := _make_ring(Vector3(0, 1.6, 0))
@@ -370,16 +372,24 @@ func _make_lantern(glow_color: Color) -> Node3D:
 	lmi.material_override = MarigoldFX.pbr(Color(0.08, 0.06, 0.05), 0.0, 0.9)
 	lmi.position.y = -0.275
 	root.add_child(lmi)
-	var mat := MarigoldFX.glow(glow_color, 1.8)
-	var body := SphereMesh.new()
-	body.radius = 0.17
-	body.height = 0.38
-	var bmi := MeshInstance3D.new()
-	bmi.mesh = body
-	bmi.material_override = mat
-	bmi.scale = Vector3(1.0, 1.12, 1.0)
-	bmi.position.y = -0.75
-	root.add_child(bmi)
+	var mat := MarigoldFX.glow(glow_color, 2.2)
+	# Real paper lantern model (Kenney CC0); falls back to the primitive body.
+	var km := MarigoldModels.instance(MarigoldModels.FANTASY, "lantern")
+	if km != null:
+		MarigoldModels.recolor_glow(km, glow_color, glow_color, 2.2)
+		km.position.y = -0.75
+		km.scale = Vector3.ONE * 1.4
+		root.add_child(km)
+	else:
+		var body := SphereMesh.new()
+		body.radius = 0.17
+		body.height = 0.38
+		var bmi := MeshInstance3D.new()
+		bmi.mesh = body
+		bmi.material_override = mat
+		bmi.scale = Vector3(1.0, 1.12, 1.0)
+		bmi.position.y = -0.75
+		root.add_child(bmi)
 	var cap_mat := MarigoldFX.pbr(Color(0.45, 0.10, 0.08), 0.0, 0.7)
 	for cy in [-0.55, -0.95]:
 		var cap := CylinderMesh.new()
@@ -530,6 +540,10 @@ void fragment() {
 		fmi2.material_override = MarigoldFX.glow(Color(1.0, 0.55, 0.25), 1.6)
 		fmi2.position = Vector3(-12.0 + float(i) * 12.0, 8.0 + float(i) * 1.5, -3.0)
 		_city.add_child(fmi2)
+	# Windmill silhouette (Kenney CC0) on the skyline.
+	var mill := MarigoldModels.place(_city, MarigoldModels.FANTASY, "windmill", Vector3(14.0, 0, -2.0), -12.0, 2.2)
+	if mill != null:
+		MarigoldModels.recolor(mill, Color(0.10, 0.08, 0.16), 0.0, 0.9)
 
 
 ## Marigold blossoms floating on the luminous water.
@@ -580,6 +594,7 @@ func _check_waypoints() -> void:
 			var feet := Vector3(cam.x, 0.08, cam.z)
 			MarigoldFX.scatter_petals(self, feet, 35)
 			MarigoldFX.spawn_sparks(self, _rings[i].global_position, Color(1.0, 0.75, 0.25), 16)
+			MarigoldHaptics.thump()
 			_sfx(ring_notes[i], 0.75, 1.2)
 			_toast("Ring %s of V — the legend unfolds" % NUMERALS[i])
 			_update_plaque(i)

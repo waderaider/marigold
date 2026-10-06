@@ -166,26 +166,32 @@ func _build_corridor() -> void:
 	for r in ROWS.size():
 		var z: float = ROWS[r][0]
 		var is_gate: bool = ROWS[r][1]
-		# Posts flanking the row.
+		# Posts flanking the row: real carved wooden pillars (Kenney CC0).
 		for sx in [-1.0, 1.0]:
 			var post := Node3D.new()
 			post.position = Vector3(sx * 2.35, 0, z)
 			add_child(post)
-			var pole := CylinderMesh.new()
-			pole.top_radius = 0.06
-			pole.bottom_radius = 0.08
-			pole.height = 3.4
-			var pole_mi := MeshInstance3D.new()
-			pole_mi.mesh = pole
-			pole_mi.material_override = post_mat
-			pole_mi.position.y = 1.7
-			post.add_child(pole_mi)
+			var km := MarigoldModels.instance(MarigoldModels.FANTASY, "pillar-wood")
+			if km != null:
+				MarigoldModels.recolor(km, Color(0.38, 0.22, 0.12), 0.1, 0.65)
+				km.scale = Vector3(1.3, 2.4, 1.3)
+				post.add_child(km)
+			else:
+				var pole := CylinderMesh.new()
+				pole.top_radius = 0.06
+				pole.bottom_radius = 0.08
+				pole.height = 3.4
+				var pole_mi := MeshInstance3D.new()
+				pole_mi.mesh = pole
+				pole_mi.material_override = post_mat
+				pole_mi.position.y = 1.7
+				post.add_child(pole_mi)
 			var topper := SphereMesh.new()
 			topper.radius = 0.10
 			topper.height = 0.20
 			var top_mi := MeshInstance3D.new()
 			top_mi.mesh = topper
-			top_mi.material_override = MarigoldFX.glow(BANNER_COLORS[r % BANNER_COLORS.size()], 2.0)
+			top_mi.material_override = MarigoldFX.glow(BANNER_COLORS[r % BANNER_COLORS.size()], 2.4)
 			top_mi.position.y = 3.45
 			post.add_child(top_mi)
 			_posts.append(post)
@@ -215,16 +221,23 @@ func _build_corridor() -> void:
 			for li in 6:
 				var t := float(li) / 5.0
 				var lpos := Vector3(sx * 2.35, 3.20 - sin(t * PI) * 0.50, lerpf(z0, z1, t))
-				var lantern := SphereMesh.new()
-				lantern.radius = 0.11
-				lantern.height = 0.20
-				var lmi := MeshInstance3D.new()
-				lmi.mesh = lantern
-				lmi.scale = Vector3(1.0, 0.85, 1.0)
+				# Real paper lantern model (Kenney CC0).
+				var lkm := MarigoldModels.instance(MarigoldModels.FANTASY, "lantern")
 				var lcol := Color(1.0, 0.62, 0.28) if li % 2 == 0 else Color(1.0, 0.42, 0.55)
-				lmi.material_override = MarigoldFX.glow(lcol, 2.0)
-				lmi.position = lpos
-				span.add_child(lmi)
+				if lkm != null:
+					MarigoldModels.recolor_glow(lkm, lcol, lcol, 2.2)
+					lkm.position = lpos
+					span.add_child(lkm)
+				else:
+					var lantern := SphereMesh.new()
+					lantern.radius = 0.11
+					lantern.height = 0.20
+					var lmi := MeshInstance3D.new()
+					lmi.mesh = lantern
+					lmi.scale = Vector3(1.0, 0.85, 1.0)
+					lmi.material_override = MarigoldFX.glow(lcol, 2.0)
+					lmi.position = lpos
+					span.add_child(lmi)
 
 
 	# Wall-anchored points for AR mode (replace posts).
@@ -442,6 +455,7 @@ func _awaken_gate(gi: int) -> void:
 	# The arch brightens with every awakened gate: visible progression.
 	_arch_glow_mat.emission_energy_multiplier = 1.4 + float(_awakened_count) * 0.9
 	_status_label.text = "%s awakened! (%d/3) - keep waving" % [GATE_NAMES[gi], _awakened_count]
+	MarigoldHaptics.fanfare()
 	if MarigoldState.music != null:
 		MarigoldState.music.pluck(72, 0.7, 1.0)
 		MarigoldState.music.pluck(76, 0.7, 1.2)
