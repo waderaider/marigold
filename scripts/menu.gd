@@ -17,9 +17,9 @@ signal updates_requested
 signal download_requested
 signal install_requested
 
-const VP_SIZE := Vector2(1280, 1440)
-const QUAD_SIZE := Vector2(1.9, 2.14)
-const QUAD_POS := Vector3(0, 1.6, -2.0)
+const VP_SIZE := Vector2(1280, 1560)
+const QUAD_SIZE := Vector2(1.9, 2.32)
+const QUAD_POS := Vector3(0, 1.62, -2.0)
 
 const C_MARIGOLD := Color(1.0, 0.68, 0.18)
 const C_CREAM := Color(1.0, 0.93, 0.82)
