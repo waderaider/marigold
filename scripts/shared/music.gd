@@ -10,6 +10,9 @@ const AUDIO_DIR := "res://assets/audio/"
 var _players: Dictionary = {}
 var _current_mood := ""
 var _volume_db := -6.0
+var _amb_players: Dictionary = {}
+var _amb_volume_db := -14.0
+var _thunder_stream: AudioStreamWAV = null
 
 
 func _ready() -> void:
@@ -49,6 +52,60 @@ func set_volume(db: float) -> void:
 	_volume_db = db
 	for key in _players:
 		(_players[key] as AudioStreamPlayer).volume_db = db
+
+
+## ---- Weather ambience (MarigoldSky, v0.4.0) ----
+## Looped rain/wind beds, crossfade-free like moods. All content synthesized
+## by tools/make_weather_audio.py - no licensed assets.
+
+## Start (or keep) a looped ambience bed. kind: "rain" | "wind".
+func play_ambience(kind: String) -> void:
+	if kind != "rain" and kind != "wind":
+		push_warning("[MarigoldMusic] unknown ambience: " + kind)
+		return
+	var p: AudioStreamPlayer = _amb_players.get(kind)
+	if p == null:
+		p = AudioStreamPlayer.new()
+		p.name = "Amb_" + kind
+		p.volume_db = _amb_volume_db
+		p.bus = "Master"
+		add_child(p)
+		_amb_players[kind] = p
+		var stream: AudioStreamWAV = load(AUDIO_DIR + kind + ".wav")
+		if stream != null:
+			stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			stream.loop_begin = 0
+			stream.loop_end = stream.get_data().size() / 2
+			p.stream = stream
+	if p.stream != null and not p.playing:
+		p.play()
+
+
+## Stop all ambience beds.
+func stop_ambience() -> void:
+	for key in _amb_players:
+		(_amb_players[key] as AudioStreamPlayer).stop()
+
+
+func set_ambience_volume(db: float) -> void:
+	_amb_volume_db = db
+	for key in _amb_players:
+		(_amb_players[key] as AudioStreamPlayer).volume_db = db
+
+
+## One-shot thunder clap, volume scaled by intensity 0..1. Auto-freed.
+func play_thunder(intensity: float = 1.0) -> void:
+	if _thunder_stream == null:
+		_thunder_stream = load(AUDIO_DIR + "thunder.wav")
+	if _thunder_stream == null:
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream = _thunder_stream
+	p.volume_db = lerpf(-16.0, -2.0, clampf(intensity, 0.0, 1.0))
+	p.bus = "Master"
+	add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
 
 
 ## Runtime Karplus-Strong plucked string for the guitar station.

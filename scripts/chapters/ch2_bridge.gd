@@ -48,6 +48,8 @@ var _fireflies: Array[GPUParticles3D] = []
 var _shocks: Array[Dictionary] = []
 var _toast_label: Label3D
 var _toast_time := 0.0
+# Wind + physics integration (v0.4.0).
+var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
 
 
 func setup(ar_mode: bool) -> void:
@@ -97,13 +99,17 @@ func _process(delta: float) -> void:
 	for i in _rings.size():
 		if not _ring_done[i]:
 			MarigoldFX.pulse_glow(_ring_mats[i], 1.2, 0.6, _t + float(i) * 0.9, 2.5)
-	# Lantern sway + breathing glow.
+	# Lantern sway + breathing glow, driven by the wind (directional swing).
+	var wind := _wind_strength()
 	for i in _lanterns.size():
 		if not is_instance_valid(_lanterns[i]):
 			continue
-		_lanterns[i].rotation.z = sin(_t * 0.8 + _lantern_phase[i]) * 0.07
-		_lanterns[i].rotation.x = cos(_t * 0.6 + _lantern_phase[i]) * 0.05
-		MarigoldFX.pulse_glow(_lantern_mats[i], 1.6, 0.45, _t + _lantern_phase[i], 1.8)
+		var wvec := _wind_at(_lanterns[i].global_position)
+		var gust := 1.0 + wind * 3.0
+		_lanterns[i].rotation.z = sin(_t * 0.8 + _lantern_phase[i]) * 0.07 * gust + wvec.x * 0.35
+		_lanterns[i].rotation.x = cos(_t * 0.6 + _lantern_phase[i]) * 0.05 * gust - wvec.z * 0.35
+		MarigoldFX.pulse_glow(_lantern_mats[i], 1.6, 0.45 * (0.6 + wind * 3.2), _t + _lantern_phase[i], 1.8)
+	_update_sway_wind()
 	# Blossoms bobbing on the water.
 	for i in _blossoms.size():
 		var b := _blossoms[i]
@@ -152,6 +158,83 @@ func _sfx(note: int, vol: float = 0.7, dur: float = 1.0) -> void:
 		m.call("pluck", note, vol, dur)
 
 
+## ---------------- wind + physics (v0.4.0) ----------------
+
+## Null-safe wind reads (headless tests may lack the sky singleton).
+func _wind_strength() -> float:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_strength()
+	return 0.0
+
+
+func _wind_at(pos: Vector3) -> Vector3:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_at(pos)
+	return Vector3.ZERO
+
+
+## Give a flower field cloth-like sway via the shared wind shader.
+func _apply_field_sway(root: Node) -> void:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			var src: Material = mi.get_active_material(0)
+			if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:
+				var tint: Color = (src as StandardMaterial3D).emission
+				var key := tint.to_html()
+				if not _sway_mats.has(key):
+					_sway_mats[key] = MarigoldSky.wind_sway_material(tint, 0.5)
+				mi.material_override = _sway_mats[key] as ShaderMaterial
+		for c in n.get_children():
+			stack.append(c)
+
+
+## Push gust strength into our sway materials (the sky does this too when live).
+func _update_sway_wind() -> void:
+	if MarigoldSky.instance == null:
+		return
+	var w := MarigoldSky.instance.get_wind_strength()
+	for m in _sway_mats.values():
+		(m as ShaderMaterial).set_shader_parameter("wind_strength", w)
+
+
+## Invisible static collider so dynamic props rest on a support surface.
+static func _static_box(parent: Node3D, center: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	body.name = "SupportCol"
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	col.shape = shape
+	body.position = center
+	body.add_child(col)
+	parent.add_child(body)
+
+
+## Convert a decorative prop into a real rigid body; the collision shape is
+## recentered on the visual AABB so the prop rests exactly on its support.
+static func _make_prop_dynamic(node: Node3D, shape: String, mass: float) -> RigidBody3D:
+	var body := MarigoldSky.make_dynamic(node, shape, mass)
+	var box := AABB()
+	var found := false
+	var to_local: Transform3D = node.global_transform.affine_inverse()
+	for mi in node.find_children("", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m == null or m.mesh == null:
+			continue
+		var mab: AABB = to_local * m.global_transform * m.get_aabb()
+		box = mab if not found else box.merge(mab)
+		found = true
+	if found:
+		for c in body.get_children():
+			if c is CollisionShape3D:
+				(c as CollisionShape3D).position = box.get_center()
+				break
+	return body
+
+
 ## ---------------- build ----------------
 
 func _build() -> void:
@@ -186,8 +269,13 @@ func _build() -> void:
 	add_child(_backdrop)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, -BRIDGE_LENGTH * 0.5 - 0.5), 9.0)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, 2.5), 9.0, Color(1.0, 0.5, 0.7))
-	MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 11).position = Vector3(-4.5, -0.4, -6.0)
-	MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 22).position = Vector3(4.5, -0.4, -12.0)
+	# Marigold banks sway with the wind.
+	var bank_l := MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 11)
+	bank_l.position = Vector3(-4.5, -0.4, -6.0)
+	_apply_field_sway(bank_l)
+	var bank_r := MarigoldModels.make_flower_field(_backdrop, 110, 5.0, 22)
+	bank_r.position = Vector3(4.5, -0.4, -12.0)
+	_apply_field_sway(bank_r)
 	MarigoldFX.spawn_ambient_motes(_backdrop, Vector3(0, 2.0, -9.0), 4.0, 50)
 
 	# Layered dressing: fireflies, petal drift, city, blossoms.
@@ -231,6 +319,9 @@ func _layout_bridge() -> void:
 	deck.material = deck_mat
 	deck_mi.position = Vector3(0, -0.075, -BRIDGE_LENGTH * 0.5 + 2.0)
 	_bridge.add_child(deck_mi)
+	# Static collider so loose blossoms below rest on the deck.
+	_static_box(_bridge, Vector3(0, -0.075, -BRIDGE_LENGTH * 0.5 + 2.0),
+		Vector3(1.8, 0.15, BRIDGE_LENGTH))
 
 	# Glowing edge rails.
 	var rail_mat := MarigoldFX.glow(Color(1.0, 0.62, 0.12), 1.6)
@@ -244,8 +335,20 @@ func _layout_bridge() -> void:
 		_bridge.add_child(rail_mi)
 
 	# Marigold strip down the center of the deck: real flowers (Kenney CC0).
+	# The strip sways with the wind; a few loose center blossoms are real
+	# rigid bodies (they rest on the deck collider above).
 	var strip := MarigoldModels.make_flower_field(_bridge, 90, 0.85, 33)
 	strip.position = Vector3(0, 0.05, -BRIDGE_LENGTH * 0.5 + 2.0)
+	_apply_field_sway(strip)
+	var dyn_count := 0
+	for child in strip.get_children():
+		if dyn_count >= 4:
+			break
+		if child is Node3D:
+			var cp: Vector3 = (child as Node3D).position
+			if Vector2(cp.x, cp.z).length() < 0.45:
+				_make_prop_dynamic(child as Node3D, "sphere", 0.25)
+				dyn_count += 1
 
 	# Start arch (decorative) and 5 waypoint rings.
 	_bridge.add_child(_make_stone_arch(Vector3(0, 0, 2.5), false))

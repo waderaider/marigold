@@ -14,7 +14,7 @@ const EXPERIENCES := {
 	"guitarra": {"name": "Guitarra Mexicana", "scene": "res://scenes/chapters/guitarra.tscn", "mood": "festive"},
 }
 
-var _world_env: WorldEnvironment
+var _sky: MarigoldSky
 var _title_root: Node3D
 var _chapter_root: Node3D
 var _chapter_index := -1
@@ -28,7 +28,10 @@ var _t := 0.0
 
 func _ready() -> void:
 	MarigoldState.reset()
-	_world_env = MarigoldFX.make_night_sky(self)
+	# Living sky: day/night cycle, weather, wind. Replaces the old static night sky.
+	_sky = MarigoldSky.new()
+	_sky.name = "MarigoldSky"
+	add_child(_sky)
 	_chapter_root = Node3D.new()
 	_chapter_root.name = "ChapterRoot"
 	add_child(_chapter_root)
@@ -75,13 +78,14 @@ func set_ar_mode(on: bool) -> void:
 		return # desktop: visual change only
 	if on and _xr.get_supported_environment_blend_modes().has(XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND):
 		get_viewport().transparent_bg = true
-		_world_env.environment.background_mode = Environment.BG_COLOR
-		_world_env.environment.background_color = Color(0, 0, 0, 0)
+		_sky.world_env.environment.background_mode = Environment.BG_COLOR
+		_sky.world_env.environment.background_color = Color(0, 0, 0, 0)
 		_xr.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
 	else:
 		get_viewport().transparent_bg = false
-		_world_env.environment.background_mode = Environment.BG_SKY
+		_sky.world_env.environment.background_mode = Environment.BG_SKY
 		_xr.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+	_sky.set_ar_mode(on)
 	# If a chapter is active, let it re-layout for the new mode.
 	if _current_chapter and _current_chapter.has_method("apply_mode"):
 		_current_chapter.apply_mode(on)
@@ -118,6 +122,7 @@ func _build_menu() -> void:
 	_menu.updates_requested.connect(_on_check_updates)
 	_menu.download_requested.connect(_on_download_update)
 	_menu.install_requested.connect(_on_install_update)
+	_menu.time_mode_chosen.connect(_on_time_mode)
 
 
 func _on_menu_chapter(idx: int) -> void:
@@ -161,11 +166,18 @@ func _on_experience_complete() -> void:
 		_current_chapter = null
 	MarigoldState.music.stop()
 	MarigoldState.reset()
+	if _sky:
+		_sky.set_gentle_mode(false) # experiences may have requested gentle weather
 	_menu.show_menu()
 
 
 func _on_toggle_mode() -> void:
 	set_ar_mode(not MarigoldState.ar_mode)
+
+
+func _on_time_mode(mode: String) -> void:
+	if _sky:
+		_sky.set_time_mode(mode)
 
 
 ## ---- Update checker ----
@@ -238,5 +250,7 @@ func _on_chapter_complete() -> void:
 
 func _show_finale_card() -> void:
 	MarigoldState.music.stop()
+	if _sky:
+		_sky.set_gentle_mode(false)
 	_menu.show_finale()
 	MarigoldFX.scatter_petals(_title_root, Vector3(0, 1.5, 0), 80)

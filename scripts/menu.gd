@@ -16,6 +16,7 @@ signal mode_toggled
 signal updates_requested
 signal download_requested
 signal install_requested
+signal time_mode_chosen(mode: String)
 
 const VP_SIZE := Vector2(1280, 1560)
 const QUAD_SIZE := Vector2(1.9, 2.32)
@@ -43,6 +44,7 @@ var _download_button: Button
 var _install_button: Button
 var _chapter_names: Array = []
 var _experiences: Array = []
+var _time_buttons: Dictionary = {}
 
 
 func _ready() -> void:
@@ -109,6 +111,16 @@ func set_status(text: String) -> void:
 
 func set_mode(ar: bool) -> void:
 	_mode_button.text = "Mode: AR Living Room" if ar else "Mode: Immersive World"
+
+
+func set_time_mode(mode: String) -> void:
+	for k in _time_buttons:
+		(_time_buttons[k] as Button).button_pressed = (k == mode)
+
+
+func _on_time_mode(mode: String) -> void:
+	set_time_mode(mode)
+	time_mode_chosen.emit(mode)
 
 
 func set_version(text: String) -> void:
@@ -214,6 +226,20 @@ func _build_ui() -> void:
 	exp_box.name = "ExperiencesBox"
 	exp_box.add_theme_constant_override("separation", 12)
 	_menu_panel.add_child(exp_box)
+
+	_add_label(_menu_panel, "Sky & Weather", 40, C_MARIGOLD)
+	var sky_row := HBoxContainer.new()
+	sky_row.name = "SkyRow"
+	sky_row.add_theme_constant_override("separation", 10)
+	sky_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_menu_panel.add_child(sky_row)
+	for m in [["dawn", "Dawn"], ["day", "Day"], ["sunset", "Sunset"], ["night", "Night"], ["auto", "Auto"]]:
+		var tb := _make_button(m[1], 34)
+		tb.toggle_mode = true
+		tb.pressed.connect(_on_time_mode.bind(m[0]))
+		sky_row.add_child(tb)
+		_time_buttons[m[0]] = tb
+	set_time_mode("sunset") # default: golden sunset, the iconic mood
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)

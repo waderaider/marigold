@@ -77,6 +77,11 @@ var _perfects := 0
 
 var _prev_swipe_x := 0.0
 var _has_prev_swipe := false
+# Wind integration (v0.4.0). Notes/particles are UI and stay untouched.
+var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
+var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
+var _wind_flames: Array[StandardMaterial3D] = [] # lantern-post flame materials
+var _wind_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": float}
 
 
 func _ready() -> void:
@@ -92,6 +97,9 @@ func _ready() -> void:
 
 func setup(ar_mode: bool) -> void:
 	_ar_mode = ar_mode
+	# Gentle weather during the performance: no thunderstorm mid-song.
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.set_gentle_mode(true)
 	apply_mode(ar_mode)
 
 
@@ -105,6 +113,7 @@ func apply_mode(on: bool) -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	_update_wind_fx() # banners ripple, lantern flames dance with gusts
 	if _judge_t > 0.0:
 		_judge_t -= delta
 		if _judge_t <= 0.0 and _judge_label:
@@ -120,6 +129,82 @@ func _process(delta: float) -> void:
 			_update_mode_select() # reuse orb-pinch logic for Play Again / Menu
 		Phase.FREE:
 			_update_free(delta)
+
+
+## ---------------- wind integration (v0.4.0) ----------------
+## Notes and particles are UI and stay untouched; only banners, the flower
+## field, and lantern-post flames respond to the wind (kept gentle by
+## set_gentle_mode(true) in setup()).
+
+## Null-safe wind strength (headless tests may lack the sky singleton).
+func _wind_strength() -> float:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_strength()
+	return 0.0
+
+
+## Remember a papel banner's vertex-shader material for wind driving.
+## The banner's own cutout shader is preserved (look untouched).
+func _track_banner(b: MeshInstance3D) -> void:
+	var pm := b.mesh as PrimitiveMesh
+	if pm == null:
+		return
+	var sm := pm.material as ShaderMaterial
+	if sm != null and not _banner_mats.has(sm):
+		_banner_mats.append(sm)
+
+
+## Give a flower field cloth-like sway via the shared wind shader.
+func _apply_field_sway(root: Node) -> void:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			var src: Material = mi.get_active_material(0)
+			if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:
+				var tint: Color = (src as StandardMaterial3D).emission
+				var key := tint.to_html()
+				if not _sway_mats.has(key):
+					_sway_mats[key] = MarigoldSky.wind_sway_material(tint, 0.5)
+				mi.material_override = _sway_mats[key] as ShaderMaterial
+		for c in n.get_children():
+			stack.append(c)
+
+
+## Track a make_candle's flame material + point light for wind flicker.
+func _track_candle_flames(root: Node3D) -> void:
+	var flame := root.get_node_or_null("Flame")
+	if flame is MeshInstance3D:
+		var m: Material = (flame as MeshInstance3D).get_active_material(0)
+		if m is StandardMaterial3D:
+			_wind_flames.append(m)
+	for c in root.get_children():
+		if c is OmniLight3D:
+			_wind_lights.append({"light": c, "base": (c as OmniLight3D).light_energy,
+				"phase": randf() * TAU})
+
+
+## Per-frame wind response: banners ripple, lantern flames + lights dance.
+func _update_wind_fx() -> void:
+	var wind := _wind_strength()
+	var amp := 0.09 * (0.7 + wind * 2.5)
+	var speed := 2.2 * (0.85 + wind * 1.6)
+	for mat in _banner_mats:
+		mat.set_shader_parameter("wave_amp", amp)
+		mat.set_shader_parameter("wave_speed", speed)
+	if MarigoldSky.instance != null:
+		for m in _sway_mats.values():
+			(m as ShaderMaterial).set_shader_parameter("wind_strength", wind)
+	var flick := 0.5 + wind * 3.0 # calm day = gentle flicker, storm = wild dance
+	for i in _wind_flames.size():
+		var fm := _wind_flames[i]
+		if is_instance_valid(fm):
+			MarigoldFX.pulse_glow(fm, 2.6, 1.2 * flick, _t * 1.1 + float(i) * 1.9, 11.0)
+	for d in _wind_lights:
+		var l: OmniLight3D = d["light"]
+		if is_instance_valid(l):
+			l.light_energy = float(d["base"]) * (1.0 + (0.10 + wind * 0.45) * sin(_t * 12.0 + float(d["phase"])))
 
 
 ## ---- plaza ----
@@ -140,27 +225,30 @@ func _build_plaza() -> void:
 	disc_mi.position = Vector3(0, -0.06, -1.0)
 	_ground_group.add_child(disc_mi)
 
-	MarigoldModels.make_flower_field(_ground_group, 160, 8.5, 4242)
+	# Wind: the plaza flower field sways with gusts.
+	_apply_field_sway(MarigoldModels.make_flower_field(_ground_group, 160, 8.5, 4242))
 	MarigoldFX.spawn_ambient_motes(self, Vector3(0, 1.8, -1.0), 4.5, 50)
 
 	_dressing = Node3D.new()
 	_dressing.name = "Dressing"
 	add_child(_dressing)
 
-	# Papel picado canopy overhead.
+	# Papel picado canopy overhead (wind-rippled).
 	var cols := [Color(1.0, 0.30, 0.55), Color(1.0, 0.62, 0.12), Color(0.35, 0.75, 1.0), Color(0.65, 0.35, 1.0)]
 	for i in 4:
 		var b := MarigoldFX.make_papel_banner(_dressing, 3.2, 1.1, cols[i % cols.size()])
 		b.position = Vector3(-2.4 + i * 1.6, 3.6, -1.6 - (i % 2) * 0.8)
 		b.rotation.y = 0.15 if i % 2 == 0 else -0.15
+		_track_banner(b)
 
-	# Lantern posts with warm light.
+	# Lantern posts with warm light (flames + lights flicker with gusts).
 	for i in 4:
 		var a := i * PI / 2.0 + PI / 4.0
 		var px := cos(a) * 3.4
 		var pz := -1.0 + sin(a) * 3.4
 		var post := MarigoldFX.make_candle(_dressing, Vector3(px, 0.0, pz), true, 1.1)
 		post.scale = Vector3(1.6, 2.2, 1.6)
+		_track_candle_flames(post)
 		MarigoldFX.make_point_light(_dressing, Vector3(px, 2.4, pz), Color(1.0, 0.62, 0.25), 1.2, 6.0)
 
 	MarigoldFX.make_point_light(self, Vector3(0, 2.2, -0.6), Color(1.0, 0.72, 0.38), 1.0, 5.0)

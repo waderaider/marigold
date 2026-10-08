@@ -56,6 +56,13 @@ var _complete_sent := false
 var _rng := RandomNumberGenerator.new()
 
 
+## Null-safe wind strength (headless tests may lack the sky singleton).
+func _wind_strength() -> float:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_strength()
+	return 0.0
+
+
 func _ready() -> void:
 	_rng.seed = 4242
 	_build_corridor()
@@ -429,13 +436,20 @@ func _ripple(ppos: Vector3) -> void:
 
 
 func _update_banners(delta: float) -> void:
+	# The banner chapter goes furthest: the wind itself drives the cloth
+	# ripple (calm = gentle sway, storm = wild snap), and hand-wave boosts
+	# still stack on top of the wind-driven base.
+	var wind := _wind_strength()
+	var gust := 1.2 + wind * 4.0
+	var speed := 2.2 * (0.9 + wind * 1.8)
 	for b in _banners:
 		var mat: ShaderMaterial = b["mat"]
 		var boost: float = float(b["boost"])
 		if boost > 0.0:
 			boost = maxf(0.0, boost - delta * 0.7)
 			b["boost"] = boost
-			mat.set_shader_parameter("wave_amp", BASE_WAVE_AMP + boost * 0.55)
+		mat.set_shader_parameter("wave_amp", (BASE_WAVE_AMP + boost * 0.55) * gust)
+		mat.set_shader_parameter("wave_speed", speed)
 		if bool(b["awakened"]):
 			var base: Color = b["base_tint"]
 			var k := 0.5 + 0.5 * sin(_t * 3.0 + float(b["phase"]))

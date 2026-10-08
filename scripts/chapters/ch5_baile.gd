@@ -76,6 +76,11 @@ var _progress_ring: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
 var _candles: Array = []
 var _plaque: Node3D = null
+# Wind + physics integration (v0.4.0).
+var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
+var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
+var _wind_flames: Array[StandardMaterial3D] = [] # candle flame materials
+var _wind_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": float}
 
 
 ## ---- Chapter contract ----
@@ -128,6 +133,82 @@ func apply_mode(on: bool) -> void:
 		_world.rotation.y = 0.0
 
 
+## ---------------- wind integration (v0.4.0) ----------------
+## (No physics pass here: every freestanding prop is code-animated - the
+## dancers stay kinematic per the chapter contract, the rim candles bob in
+## _update_candles, and the ghosts drift on scripted paths.)
+
+## Null-safe wind strength (headless tests may lack the sky singleton).
+func _wind_strength() -> float:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_strength()
+	return 0.0
+
+
+## Remember a papel banner's vertex-shader material for wind driving.
+## The banner's own cutout shader is preserved (look untouched).
+func _track_banner(b: MeshInstance3D) -> void:
+	var pm := b.mesh as PrimitiveMesh
+	if pm == null:
+		return
+	var sm := pm.material as ShaderMaterial
+	if sm != null and not _banner_mats.has(sm):
+		_banner_mats.append(sm)
+
+
+## Give a flower field cloth-like sway via the shared wind shader.
+func _apply_field_sway(root: Node) -> void:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			var src: Material = mi.get_active_material(0)
+			if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:
+				var tint: Color = (src as StandardMaterial3D).emission
+				var key := tint.to_html()
+				if not _sway_mats.has(key):
+					_sway_mats[key] = MarigoldSky.wind_sway_material(tint, 0.5)
+				mi.material_override = _sway_mats[key] as ShaderMaterial
+		for c in n.get_children():
+			stack.append(c)
+
+
+## Track a make_candle's flame material + point light for wind flicker.
+func _track_candle_flames(root: Node3D) -> void:
+	var flame := root.get_node_or_null("Flame")
+	if flame is MeshInstance3D:
+		var m: Material = (flame as MeshInstance3D).get_active_material(0)
+		if m is StandardMaterial3D:
+			_wind_flames.append(m)
+	for c in root.get_children():
+		if c is OmniLight3D:
+			_wind_lights.append({"light": c, "base": (c as OmniLight3D).light_energy,
+				"phase": randf() * TAU})
+
+
+## Per-frame wind response: banners ripple, candle flames + lights dance.
+func _update_wind_fx() -> void:
+	var wind := _wind_strength()
+	var amp := 0.09 * (0.7 + wind * 2.5)
+	var speed := 2.2 * (0.85 + wind * 1.6)
+	for mat in _banner_mats:
+		mat.set_shader_parameter("wave_amp", amp)
+		mat.set_shader_parameter("wave_speed", speed)
+	if MarigoldSky.instance != null:
+		for m in _sway_mats.values():
+			(m as ShaderMaterial).set_shader_parameter("wind_strength", wind)
+	var flick := 0.5 + wind * 3.0 # calm day = gentle flicker, storm = wild dance
+	for i in _wind_flames.size():
+		var fm := _wind_flames[i]
+		if is_instance_valid(fm):
+			MarigoldFX.pulse_glow(fm, 2.6, 1.2 * flick, _t * 1.1 + float(i) * 1.9, 11.0)
+	for d in _wind_lights:
+		var l: OmniLight3D = d["light"]
+		if is_instance_valid(l):
+			l.light_energy = float(d["base"]) * (1.0 + (0.10 + wind * 0.45) * sin(_t * 12.0 + float(d["phase"])))
+
+
 ## ---- Build ----
 
 func _build_world() -> void:
@@ -136,8 +217,10 @@ func _build_world() -> void:
 	add_child(_world)
 
 	# Marigold field ring around the plaza (hidden in AR): real flowers (Kenney CC0).
+	# Wind: the field sways with gusts.
 	var field := MarigoldModels.make_flower_field(_world, 200, 9.0, 555)
 	field.position = STAGE_CENTER
+	_apply_field_sway(field)
 	_ar_hidden.append(field)
 
 	# God rays (hidden in AR).
@@ -155,6 +238,7 @@ func _build_world() -> void:
 		var banner := MarigoldFX.make_papel_banner(_world, b[1], 1.1, b[2])
 		banner.position = b[0]
 		banner.rotation.y = b[3]
+		_track_banner(banner)
 		_ar_hidden.append(banner)
 
 	# Ambient motes stay in both modes.
@@ -210,10 +294,12 @@ func _build_stage() -> void:
 	_world.add_child(med)
 
 	# Floating candles around the rim: emissive only, except 2 real lights.
+	# Wind: flames + lights flicker with gusts (positions keep bobbing).
 	for i in 8:
 		var a := TAU * float(i) / 8.0
 		var pos := STAGE_CENTER + Vector3(cos(a) * 3.35, 0.55, sin(a) * 3.35)
 		var candle := MarigoldFX.make_candle(_world, pos, i == 0 or i == 4, 0.8)
+		_track_candle_flames(candle)
 		_candles.append({"node": candle, "base_y": 0.55, "phase": TAU * float(i) / 8.0})
 
 	# One warm wash light over the stage (plus the 2 candle lights = light budget).
@@ -559,6 +645,7 @@ func _process(delta: float) -> void:
 	_update_leader(delta)
 	_update_candles()
 	_update_ghosts(delta)
+	_update_wind_fx() # banners ripple, rim candle flames dance with gusts
 
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)

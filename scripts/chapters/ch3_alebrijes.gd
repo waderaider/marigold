@@ -54,6 +54,11 @@ var _has_prev_strum := false
 var _plaque: Node3D
 var _feed_label: Label3D
 var _status_label: Label3D
+# Wind + physics integration (v0.4.0).
+var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
+var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
+var _wind_flames: Array[StandardMaterial3D] = [] # candle flame materials
+var _wind_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": float}
 
 
 func _ready() -> void:
@@ -122,8 +127,117 @@ func _process(delta: float) -> void:
 	_animate_guides(delta)
 	_update_feeding()
 	_update_strum()
+	_update_wind_fx() # banners ripple, stall candle flames dance with gusts
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)
+
+
+## ---------------- wind + physics (v0.4.0) ----------------
+
+## Null-safe wind strength (headless tests may lack the sky singleton).
+func _wind_strength() -> float:
+	if MarigoldSky.instance != null:
+		return MarigoldSky.instance.get_wind_strength()
+	return 0.0
+
+
+## Remember a papel banner's vertex-shader material for wind driving.
+## The banner's own cutout shader is preserved (look untouched).
+func _track_banner(b: MeshInstance3D) -> void:
+	var pm := b.mesh as PrimitiveMesh
+	if pm == null:
+		return
+	var sm := pm.material as ShaderMaterial
+	if sm != null and not _banner_mats.has(sm):
+		_banner_mats.append(sm)
+
+
+## Give a flower field cloth-like sway via the shared wind shader.
+func _apply_field_sway(root: Node) -> void:
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			var src: Material = mi.get_active_material(0)
+			if src is StandardMaterial3D and (src as StandardMaterial3D).emission_enabled:
+				var tint: Color = (src as StandardMaterial3D).emission
+				var key := tint.to_html()
+				if not _sway_mats.has(key):
+					_sway_mats[key] = MarigoldSky.wind_sway_material(tint, 0.5)
+				mi.material_override = _sway_mats[key] as ShaderMaterial
+		for c in n.get_children():
+			stack.append(c)
+
+
+## Track a make_candle's flame material + point light for wind flicker.
+func _track_candle_flames(root: Node3D) -> void:
+	var flame := root.get_node_or_null("Flame")
+	if flame is MeshInstance3D:
+		var m: Material = (flame as MeshInstance3D).get_active_material(0)
+		if m is StandardMaterial3D:
+			_wind_flames.append(m)
+	for c in root.get_children():
+		if c is OmniLight3D:
+			_wind_lights.append({"light": c, "base": (c as OmniLight3D).light_energy,
+				"phase": randf() * TAU})
+
+
+## Invisible static collider so dynamic props rest on a support surface.
+static func _static_box(parent: Node3D, center: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	body.name = "SupportCol"
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	col.shape = shape
+	body.position = center
+	body.add_child(col)
+	parent.add_child(body)
+
+
+## Convert a decorative prop into a real rigid body; the collision shape is
+## recentered on the visual AABB so the prop rests exactly on its support.
+static func _make_prop_dynamic(node: Node3D, shape: String, mass: float) -> RigidBody3D:
+	var body := MarigoldSky.make_dynamic(node, shape, mass)
+	var box := AABB()
+	var found := false
+	var to_local: Transform3D = node.global_transform.affine_inverse()
+	for mi in node.find_children("", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		if m == null or m.mesh == null:
+			continue
+		var mab: AABB = to_local * m.global_transform * m.get_aabb()
+		box = mab if not found else box.merge(mab)
+		found = true
+	if found:
+		for c in body.get_children():
+			if c is CollisionShape3D:
+				(c as CollisionShape3D).position = box.get_center()
+				break
+	return body
+
+
+## Per-frame wind response: banners ripple, candle flames + lights dance.
+func _update_wind_fx() -> void:
+	var wind := _wind_strength()
+	var amp := 0.09 * (0.7 + wind * 2.5)
+	var speed := 2.2 * (0.85 + wind * 1.6)
+	for mat in _banner_mats:
+		mat.set_shader_parameter("wave_amp", amp)
+		mat.set_shader_parameter("wave_speed", speed)
+	if MarigoldSky.instance != null:
+		for m in _sway_mats.values():
+			(m as ShaderMaterial).set_shader_parameter("wind_strength", wind)
+	var flick := 0.5 + wind * 3.0 # calm day = gentle flicker, storm = wild dance
+	for i in _wind_flames.size():
+		var fm := _wind_flames[i]
+		if is_instance_valid(fm):
+			MarigoldFX.pulse_glow(fm, 2.6, 1.2 * flick, _t * 1.1 + float(i) * 1.9, 11.0)
+	for d in _wind_lights:
+		var l: OmniLight3D = d["light"]
+		if is_instance_valid(l):
+			l.light_energy = float(d["base"]) * (1.0 + (0.10 + wind * 0.45) * sin(_t * 12.0 + float(d["phase"])))
 
 
 # ---------------------------------------------------------------- plaza build
@@ -145,7 +259,8 @@ func _build_plaza() -> void:
 	disc_mi.position.y = -0.06
 	_ground_group.add_child(disc_mi)
 
-	MarigoldModels.make_flower_field(_ground_group, 200, 9.5, 777)
+	# Wind: the plaza flower field sways with gusts.
+	_apply_field_sway(MarigoldModels.make_flower_field(_ground_group, 200, 9.5, 777))
 
 	# Fountain of glowing water at the plaza center: real carved fountain (Kenney CC0).
 	var fountain := Node3D.new()
@@ -226,7 +341,7 @@ func _build_plaza() -> void:
 	MarigoldFX.make_god_ray(self, Vector3(-4, 0, -4), 8.0, Color(1.0, 0.5, 0.7))
 	MarigoldFX.make_god_ray(self, Vector3(4, 0, -4), 8.0, Color(0.5, 0.8, 1.0))
 
-	# Papel banners strung overhead in three rows.
+	# Papel banners strung overhead in three rows (wind-rippled).
 	var rows := [-3.5, -1.0, 1.5]
 	for r in rows.size():
 		var z: float = rows[r]
@@ -235,6 +350,7 @@ func _build_plaza() -> void:
 			var col: Color = BANNER_COLORS[(r * 3 + bi) % BANNER_COLORS.size()]
 			var b := MarigoldFX.make_papel_banner(self, 2.0, 1.0, col)
 			b.position = Vector3(bx, 3.4, z)
+			_track_banner(b)
 			_banner_strings.append({"mi": b, "home": b.position})
 
 	MarigoldFX.spawn_ambient_motes(self, Vector3(0, 1.6, -1), 5.0, 70)
@@ -300,6 +416,7 @@ func _build_stall(sd: Dictionary) -> void:
 	root.add_child(tmi)
 	var banner := MarigoldFX.make_papel_banner(root, 2.0, 0.5, sd["tint"])
 	banner.position = Vector3(0, 2.05, 0.82)
+	_track_banner(banner)
 	# Counter.
 	var counter := BoxMesh.new()
 	counter.size = Vector3(1.9, 0.55, 0.9)
@@ -315,6 +432,8 @@ func _build_stall(sd: Dictionary) -> void:
 	topmi.material_override = MarigoldFX.pbr(Color(0.45, 0.26, 0.13), 0.0, 0.6)
 	topmi.position = Vector3(0, 0.86, 0)
 	root.add_child(topmi)
+	# Static collider so counter goods rest on the counter top.
+	_static_box(root, Vector3(0, 0.445, 0), Vector3(2.0, 0.89, 1.0))
 	# Goods on the counter.
 	match String(sd["goods"]):
 		"fruit":
@@ -328,6 +447,8 @@ func _build_stall(sd: Dictionary) -> void:
 				fmi.material_override = MarigoldFX.glow(fruit_cols[fi % 3], 1.1)
 				fmi.position = Vector3(-0.6 + float(fi % 3) * 0.6, 0.97, -0.18 + float(fi / 3) * 0.36)
 				root.add_child(fmi)
+				if fi < 3:
+					_make_prop_dynamic(fmi, "sphere", 0.15)
 		"pots":
 			var pot_cols := [Color(0.75, 0.35, 0.15), Color(0.20, 0.55, 0.85), Color(0.25, 0.65, 0.40)]
 			for pi in 5:
@@ -340,9 +461,11 @@ func _build_stall(sd: Dictionary) -> void:
 				potmi.material_override = MarigoldFX.pbr(pot_cols[pi % 3], 0.1, 0.5)
 				potmi.position = Vector3(-0.7 + float(pi) * 0.35, 1.01, 0.0)
 				root.add_child(potmi)
+				_make_prop_dynamic(potmi, "box", 0.40)
 		"candles":
 			for ci in 3:
-				MarigoldFX.make_candle(root, Vector3(-0.5 + float(ci) * 0.5, 0.89, 0.0), ci == 1)
+				var cm := MarigoldFX.make_candle(root, Vector3(-0.5 + float(ci) * 0.5, 0.89, 0.0), ci == 1)
+				_track_candle_flames(cm)
 	var sl := MarigoldFX.make_label(String(sd["label"]), 48, Color(1.0, 0.85, 0.55))
 	sl.position = Vector3(0, 2.85, 0)
 	root.add_child(sl)
@@ -415,9 +538,10 @@ func _build_skyline() -> void:
 				wmi.material_override = MarigoldFX.glow(Color(1.0, 0.70, 0.30), 1.4)
 				wmi.position = Vector3(wx * w * 0.5, h * wy, -w * 0.4 - 0.02)
 				broot.add_child(wmi)
-		# Papel strip along the roofline.
+		# Papel strip along the roofline (wind-rippled).
 		var strip := MarigoldFX.make_papel_banner(broot, w * 0.9, 0.6, BANNER_COLORS[i % BANNER_COLORS.size()])
 		strip.position = Vector3(0, h - 0.5, -w * 0.4 - 0.05)
+		_track_banner(strip)
 
 
 # ---------------------------------------------------------------- guide build
