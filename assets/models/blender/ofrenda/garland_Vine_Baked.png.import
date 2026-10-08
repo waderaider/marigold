@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://chxorc4rd3w2y"
-path="res://.godot/imported/candle_tall_Wax_Baked_candle_tall.png-a3308d2d07bc4bb4f6ec8a89eac44ef8.ctex"
+uid="uid://cxrhvtdxp7v3f"
+path="res://.godot/imported/garland_Vine_Baked.png-18c8ab6fbeb058ec66b4c033a832bf25.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "4a4aa1f63ed5220d61a6757e0965f813"
+"md5": "15ac5aa7721b4a8e3816ec541e19045d"
 }
 
 [deps]
 
-source_file="res://assets/models/blender/ofrenda/candle_tall_Wax_Baked_candle_tall.png"
-dest_files=["res://.godot/imported/candle_tall_Wax_Baked_candle_tall.png-a3308d2d07bc4bb4f6ec8a89eac44ef8.ctex"]
+source_file="res://assets/models/blender/ofrenda/garland_Vine_Baked.png"
+dest_files=["res://.godot/imported/garland_Vine_Baked.png-18c8ab6fbeb058ec66b4c033a832bf25.ctex"]
 
 [params]
 

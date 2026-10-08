@@ -27,6 +27,7 @@ var _frames: Array[Node3D] = []
 var _frame_home_local: Array[Transform3D] = []
 var _candles: Array[Node3D] = []
 var _candle_lit: Array[bool] = []
+var _candle_anchors: Array[float] = [] # flame height above each candle root
 var _flame_mats: Array[StandardMaterial3D] = []
 var _flame_nodes: Array[Node3D] = []
 var _basket: Node3D
@@ -369,34 +370,39 @@ func _build_ofrenda() -> void:
 	]
 	_frame_used = [false, false, false]
 
-	# Candles (start unlit) arranged on the tiers.
+	# Candles (start unlit) arranged on the tiers: tall/mid/short Blender heroes.
 	var candle_slots := [
 		Vector3(-0.95, 0.52, -0.32), Vector3(0.95, 0.52, -0.32),
 		Vector3(-0.70, 0.92, -0.28), Vector3(0.70, 0.92, -0.28),
 		Vector3(0.42, 1.32, -0.20),
 	]
-	for s in candle_slots:
-		_candles.append(_make_candle(s))
+	var candle_variants := ["tall", "tall", "mid", "mid", "short"]
+	for i in candle_slots.size():
+		_candles.append(_make_candle(candle_slots[i], candle_variants[i]))
 		_candle_lit.append(false)
 
 	# In-house Blender tall candles (decorative, unlit) flanking tier 1.
-	# Measured AABB: base at +0.09, 0.287m tall. Static glow flames only —
-	# the 5 interactive candles keep the real light budget.
+	# Measured AABB: base at +0.09, 0.287m tall.
 	for cx in [-1.02, 1.02]:
 		var tall := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_tall")
 		if tall == null:
 			continue
-		var base_y := 0.545
-		tall.position = Vector3(cx, base_y - 0.09, 0.28)
+		tall.position = Vector3(cx, 0.545 - 0.09, 0.28)
 		_ofrenda.add_child(tall)
-		var tflame := SphereMesh.new()
-		tflame.radius = 0.016
-		tflame.height = 0.05
-		var tflame_mi := MeshInstance3D.new()
-		tflame_mi.mesh = tflame
-		tflame_mi.material_override = MarigoldFX.glow(Color(1.0, 0.65, 0.15), 3.0)
-		tflame_mi.position = Vector3(cx, base_y + 0.287 + 0.02, 0.28)
-		_ofrenda.add_child(tflame_mi)
+
+	# In-house Blender painted calaveras flanking the altar (mid-ground props).
+	var cal_slots := [
+		{"model": "calavera_a", "x": -1.45},
+		{"model": "calavera_b", "x": 1.45},
+	]
+	for cs in cal_slots:
+		var cal := MarigoldModels.blender_model(MarigoldModels.OFRENDA, String(cs["model"]))
+		if cal == null:
+			continue
+		cal.scale = Vector3(1.4, 1.4, 1.4)
+		cal.position = Vector3(float(cs["x"]), 0.0045 * 1.4, 0.55)
+		cal.rotation.y = -0.35 if float(cs["x"]) < 0.0 else 0.35
+		_stage.add_child(cal)
 
 	# Decorative food offerings (non-interactive): bread + cups on tier 1.
 	var bread_mat := MarigoldFX.pbr(Color(0.85, 0.62, 0.35), 0.0, 0.85)
@@ -466,13 +472,28 @@ func _build_offerings() -> void:
 		var plate := _make_food_plate()
 		plate.position = pos
 		_ofrenda.add_child(plate)
-	# Two small decorative framed photos already watching over tier 2.
-	for i in 2:
-		var mini := _make_photo_frame(i + 1)
-		mini.scale = Vector3(0.55, 0.55, 0.55)
-		mini.position = Vector3(0.82 if i == 0 else -0.82, 0.92, 0.02)
-		mini.rotation_degrees = Vector3(-6.0, -18.0 if i == 0 else 18.0, 0)
-		_ofrenda.add_child(mini)
+	# Two ornate in-house Blender photo frames watching over tier 2.
+	# GLBs model the frame lying flat (long axis = local Z); stand upright
+	# with a 6-degree lean-back, yawed slightly toward center.
+	var frame_defs := [
+		{"model": "frame_a", "x": 0.82, "yaw": -18.0},
+		{"model": "frame_b", "x": -0.82, "yaw": 18.0},
+	]
+	for fd in frame_defs:
+		var fmodel := MarigoldModels.blender_model(MarigoldModels.OFRENDA, String(fd["model"]))
+		if fmodel != null:
+			var fpivot := Node3D.new()
+			fmodel.rotation_degrees = Vector3(-84.0, 180.0, 0.0)
+			fpivot.add_child(fmodel)
+			fpivot.position = Vector3(float(fd["x"]), 0.945 + 0.1175, 0.02)
+			fpivot.rotation.y = deg_to_rad(float(fd["yaw"]))
+			_ofrenda.add_child(fpivot)
+		else:
+			var mini := _make_photo_frame(1)
+			mini.scale = Vector3(0.55, 0.55, 0.55)
+			mini.position = Vector3(float(fd["x"]), 0.92, 0.02)
+			mini.rotation_degrees = Vector3(-6.0, float(fd["yaw"]), 0)
+			_ofrenda.add_child(mini)
 
 
 func _make_pan_de_muerto() -> Node3D:
@@ -764,6 +785,22 @@ func _build_garlands() -> void:
 		var w: float = tier["w"]
 		var top: float = tier["top"]
 		var z: float = tier["z"]
+		if w > 2.0:
+			# In-house Blender marigold garland tiled across the wide tier-1
+			# edge (tileable 0.822m segment, bushy z). Middle tile swags lower.
+			var g0 := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland")
+			if g0 != null:
+				var seg_w := 0.822
+				var n := 3
+				var sx: float = w / (seg_w * n)
+				for gi in n:
+					var g := g0 if gi == 0 else MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland")
+					if g == null:
+						continue
+					g.scale.x = sx
+					g.position = Vector3((float(gi) - 1.0) * seg_w * sx, top - 0.06 - (0.025 if gi == 1 else 0.0), z + 0.01)
+					_ofrenda.add_child(g)
+				continue
 		for i in 13:
 			var t := float(i) / 12.0
 			# Real marigold flower model (Kenney CC0) swagged along the edge.
@@ -997,34 +1034,51 @@ void fragment() {
 	return root
 
 
-## Unlit candle. Lighting is added by _light_candle (budget: 3 real lights).
-func _make_candle(slot: Vector3) -> Node3D:
+## Blender hero candle (tall/mid/short). The flame kit is wired to the model's
+## FlameAnchor empty at the wick tip, hidden until lit. Procedural fallback.
+func _make_candle(slot: Vector3, variant: String) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Candle"
 	root.position = slot
 	_ofrenda.add_child(root)
-	var wax := CylinderMesh.new()
-	wax.top_radius = 0.035
-	wax.bottom_radius = 0.042
-	wax.height = 0.22
-	var wax_mi := MeshInstance3D.new()
-	wax_mi.mesh = wax
-	wax_mi.material_override = MarigoldFX.pbr(Color(0.95, 0.88, 0.75), 0.0, 0.6)
-	wax_mi.position.y = 0.11
-	root.add_child(wax_mi)
-	var wick := CylinderMesh.new()
-	wick.top_radius = 0.006
-	wick.bottom_radius = 0.006
-	wick.height = 0.03
-	var wick_mi := MeshInstance3D.new()
-	wick_mi.mesh = wick
-	wick_mi.material_override = MarigoldFX.pbr(Color(0.08, 0.06, 0.05), 0.0, 0.9)
-	wick_mi.position.y = 0.235
-	root.add_child(wick_mi)
-	# Flame kit, hidden until lit.
+	# Measured GLB bases (origin sits below the wax) and FlameAnchor heights.
+	var defs := {
+		"tall": {"base": 0.090, "anchor": 0.384},
+		"mid": {"base": 0.065, "anchor": 0.284},
+		"short": {"base": 0.045, "anchor": 0.204},
+	}
+	var d: Dictionary = defs.get(variant, defs["mid"])
+	var base: float = d["base"]
+	var anchor: float = float(d["anchor"]) - base
+	var model := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_" + variant)
+	if model != null:
+		model.position.y = -base
+		root.add_child(model)
+	else:
+		var wax := CylinderMesh.new()
+		wax.top_radius = 0.035
+		wax.bottom_radius = 0.042
+		wax.height = 0.22
+		var wax_mi := MeshInstance3D.new()
+		wax_mi.mesh = wax
+		wax_mi.material_override = MarigoldFX.pbr(Color(0.95, 0.88, 0.75), 0.0, 0.6)
+		wax_mi.position.y = 0.11
+		root.add_child(wax_mi)
+		var wick := CylinderMesh.new()
+		wick.top_radius = 0.006
+		wick.bottom_radius = 0.006
+		wick.height = 0.03
+		var wick_mi := MeshInstance3D.new()
+		wick_mi.mesh = wick
+		wick_mi.material_override = MarigoldFX.pbr(Color(0.08, 0.06, 0.05), 0.0, 0.9)
+		wick_mi.position.y = 0.235
+		root.add_child(wick_mi)
+		anchor = 0.25
+	# Flame kit at the FlameAnchor, hidden until lit.
 	var kit := Node3D.new()
 	kit.name = "FlameKit"
 	kit.visible = false
+	kit.position = Vector3(0, anchor, 0)
 	root.add_child(kit)
 	var flame_mat := MarigoldFX.glow(Color(1.0, 0.65, 0.15), 3.0)
 	var flame := SphereMesh.new()
@@ -1033,12 +1087,12 @@ func _make_candle(slot: Vector3) -> Node3D:
 	var flame_mi := MeshInstance3D.new()
 	flame_mi.mesh = flame
 	flame_mi.material_override = flame_mat
-	flame_mi.position.y = 0.28
+	flame_mi.position.y = 0.03
 	kit.add_child(flame_mi)
 	var p := GPUParticles3D.new()
 	p.amount = 10
 	p.lifetime = 0.5
-	p.position.y = 0.28
+	p.position.y = 0.03
 	p.emitting = false
 	var pm := ParticleProcessMaterial.new()
 	pm.direction = Vector3(0, 1, 0)
@@ -1057,6 +1111,7 @@ func _make_candle(slot: Vector3) -> Node3D:
 	kit.add_child(p)
 	_flame_nodes.append(kit)
 	_flame_mats.append(flame_mat)
+	_candle_anchors.append(anchor)
 	return root
 
 
@@ -1072,10 +1127,10 @@ func _light_candle(idx: int) -> void:
 			(c as GPUParticles3D).emitting = true
 	# Light budget: only 3 real lights; the rest are emissive-only.
 	if _lights_used < 3:
-		var l := MarigoldFX.make_point_light(_candles[idx], Vector3(0, 0.38, 0), Color(1.0, 0.62, 0.25), 0.9, 3.5)
+		var l := MarigoldFX.make_point_light(_candles[idx], Vector3(0, _candle_anchors[idx], 0), Color(1.0, 0.62, 0.25), 0.9, 3.5)
 		_candle_lights.append({"light": l, "base": 0.9, "phase": randf() * TAU})
 		_lights_used += 1
-	MarigoldFX.spawn_sparks(self, _candles[idx].global_position + Vector3(0, 0.3, 0), Color(1.0, 0.7, 0.2), 12)
+	MarigoldFX.spawn_sparks(self, _candles[idx].global_position + Vector3(0, _candle_anchors[idx], 0), Color(1.0, 0.7, 0.2), 12)
 	MarigoldHaptics.thump()
 	_sfx(48, 0.8, 1.6)
 	_sfx(55, 0.5, 1.2)

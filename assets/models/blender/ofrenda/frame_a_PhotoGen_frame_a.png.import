@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://chxorc4rd3w2y"
-path="res://.godot/imported/candle_tall_Wax_Baked_candle_tall.png-a3308d2d07bc4bb4f6ec8a89eac44ef8.ctex"
+uid="uid://dml4ehlbg36p4"
+path="res://.godot/imported/frame_a_PhotoGen_frame_a.png-8b90be61fa91c54e4e3fa069005cf290.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "4a4aa1f63ed5220d61a6757e0965f813"
+"md5": "72d34f64e3e55fe402bfc90009bfe3ef"
 }
 
 [deps]
 
-source_file="res://assets/models/blender/ofrenda/candle_tall_Wax_Baked_candle_tall.png"
-dest_files=["res://.godot/imported/candle_tall_Wax_Baked_candle_tall.png-a3308d2d07bc4bb4f6ec8a89eac44ef8.ctex"]
+source_file="res://assets/models/blender/ofrenda/frame_a_PhotoGen_frame_a.png"
+dest_files=["res://.godot/imported/frame_a_PhotoGen_frame_a.png-8b90be61fa91c54e4e3fa069005cf290.ctex"]
 
 [params]
 

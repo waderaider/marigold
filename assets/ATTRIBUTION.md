@@ -16,6 +16,21 @@ No license encumbrance; created for this project.
 - `assets/models/blender/guitar/guitar.glb` — hero folk guitar, 2 nodes
   (wood + dark fittings), real materials (v0.5.0, Guitarra Mexicana
   playable instrument)
+- `assets/models/blender/ofrenda/pan_de_muerto.glb` — hero pan de muerto
+  loaf, 5,704 tris, baked crust (v0.5.0, ch1 altar offerings)
+- `assets/models/blender/ofrenda/candle_tall.glb` — tall altar candle,
+  504 tris, `FlameAnchor` at wick tip (v0.5.0, ch1)
+- `assets/models/blender/ofrenda/candle_mid.glb` — mid altar candle,
+  504 tris, `FlameAnchor` at wick tip (v0.5.0, ch1)
+- `assets/models/blender/ofrenda/candle_short.glb` — short altar candle,
+  504 tris, `FlameAnchor` at wick tip (v0.5.0, ch1)
+- `assets/models/blender/ofrenda/calavera_a.glb` / `calavera_b.glb` —
+  stylized painted sugar skulls, 828 tris each, mid-ground altar props
+  (v0.5.0, ch1)
+- `assets/models/blender/ofrenda/frame_a.glb` / `frame_b.glb` — ornate
+  photo frames, 574 tris each (v0.5.0, ch1 tier-2 frames)
+- `assets/models/blender/ofrenda/garland.glb` — tileable 0.6m marigold
+  garland, 4,328 tris (v0.5.0, ch1 tier-1 drape)
 
 ## CC0 libraries (no attribution required, listed for provenance)
 
