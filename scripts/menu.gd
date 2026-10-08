@@ -11,6 +11,7 @@ class_name MarigoldMenu
 ##   is live, so there is no double input on device).
 
 signal chapter_chosen(idx: int)
+signal experience_chosen(key: String)
 signal mode_toggled
 signal updates_requested
 signal download_requested
@@ -41,6 +42,7 @@ var _version_label: Label
 var _download_button: Button
 var _install_button: Button
 var _chapter_names: Array = []
+var _experiences: Array = []
 
 
 func _ready() -> void:
@@ -76,6 +78,11 @@ func _input(event: InputEvent) -> void:
 func set_chapters(chapters: Array) -> void:
 	_chapter_names = chapters
 	_build_chapter_buttons()
+
+
+func set_experiences(exps: Array) -> void:
+	_experiences = exps
+	_build_experience_buttons()
 
 
 func show_menu() -> void:
@@ -202,6 +209,12 @@ func _build_ui() -> void:
 	chapters_box.add_theme_constant_override("separation", 12)
 	_menu_panel.add_child(chapters_box)
 
+	_add_label(_menu_panel, "Experiences", 40, C_PINK)
+	var exp_box := VBoxContainer.new()
+	exp_box.name = "ExperiencesBox"
+	exp_box.add_theme_constant_override("separation", 12)
+	_menu_panel.add_child(exp_box)
+
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -266,6 +279,20 @@ func _build_chapter_buttons() -> void:
 		var b := _make_button("%d. %s" % [i + 1, String(info.get("name", "Chapter"))], 44)
 		var idx := i
 		b.pressed.connect(func() -> void: chapter_chosen.emit(idx))
+		box.add_child(b)
+
+
+func _build_experience_buttons() -> void:
+	var box := _menu_panel.get_node_or_null("ExperiencesBox") as VBoxContainer
+	if box == null:
+		return
+	for c in box.get_children():
+		c.queue_free()
+	for exp in _experiences:
+		var info: Dictionary = exp
+		var b := _make_button(String(info.get("name", "Experience")), 44)
+		var key := String(info.get("key", ""))
+		b.pressed.connect(func() -> void: experience_chosen.emit(key))
 		box.add_child(b)
 
 

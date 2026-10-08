@@ -10,6 +10,10 @@ const CHAPTERS := [
 	{"name": "El Gran Baile", "scene": "res://scenes/chapters/ch5_baile.tscn", "mood": "finale"},
 ]
 
+const EXPERIENCES := {
+	"guitarra": {"name": "Guitarra Mexicana", "scene": "res://scenes/chapters/guitarra.tscn", "mood": "festive"},
+}
+
 var _world_env: WorldEnvironment
 var _title_root: Node3D
 var _chapter_root: Node3D
@@ -104,10 +108,12 @@ func _build_menu() -> void:
 	_menu.name = "MenuRoot"
 	add_child(_menu)
 	_menu.set_chapters(CHAPTERS)
+	_menu.set_experiences([{"key": "guitarra", "name": "Guitarra Mexicana"}])
 	var ver: String = ProjectSettings.get_setting("application/config/version", "0.3.0")
 	_menu.set_version("v" + ver)
 	_menu.set_mode(MarigoldState.ar_mode)
 	_menu.chapter_chosen.connect(_on_menu_chapter)
+	_menu.experience_chosen.connect(_on_menu_experience)
 	_menu.mode_toggled.connect(_on_toggle_mode)
 	_menu.updates_requested.connect(_on_check_updates)
 	_menu.download_requested.connect(_on_download_update)
@@ -121,6 +127,41 @@ func _on_menu_chapter(idx: int) -> void:
 	_menu.hide_menu()
 	MarigoldState.journey_started = true
 	_load_chapter(idx)
+
+
+func _on_menu_experience(key: String) -> void:
+	if not EXPERIENCES.has(key):
+		return
+	MarigoldState.reset()
+	_menu.hide_menu()
+	MarigoldState.journey_started = true
+	_load_experience(key)
+
+
+func _load_experience(key: String) -> void:
+	if _current_chapter:
+		_current_chapter.queue_free()
+		_current_chapter = null
+	var info: Dictionary = EXPERIENCES[key]
+	var scene: PackedScene = load(info["scene"])
+	_current_chapter = scene.instantiate()
+	_chapter_root.add_child(_current_chapter)
+	if _current_chapter.has_method("setup"):
+		_current_chapter.setup(MarigoldState.ar_mode)
+	if _current_chapter.has_signal("chapter_complete"):
+		_current_chapter.chapter_complete.connect(_on_experience_complete)
+	MarigoldState.music.play_mood(info["mood"])
+
+
+func _on_experience_complete() -> void:
+	# Experiences return to the menu instead of advancing the journey.
+	await get_tree().create_timer(0.8).timeout
+	if _current_chapter:
+		_current_chapter.queue_free()
+		_current_chapter = null
+	MarigoldState.music.stop()
+	MarigoldState.reset()
+	_menu.show_menu()
 
 
 func _on_toggle_mode() -> void:
