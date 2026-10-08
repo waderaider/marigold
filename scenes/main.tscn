@@ -10,6 +10,12 @@ script = ExtResource("1")
 
 [node name="XROrigin3D" type="XROrigin3D" parent="."]
 
+[node name="LeftController" type="XRController3D" parent="XROrigin3D"]
+tracker = "left_hand"
+
+[node name="RightController" type="XRController3D" parent="XROrigin3D"]
+tracker = "right_hand"
+
 [node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
 
 [node name="DesktopCamera" type="Camera3D" parent="."]

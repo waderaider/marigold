@@ -89,7 +89,7 @@ func _ready() -> void:
 	drift.process_material = dpm
 	var dquad := QuadMesh.new()
 	dquad.size = Vector2(0.05, 0.035)
-	dquad.material_override = MarigoldFX.glow(Color(1.0, 0.65, 0.12), 1.8)
+	dquad.material = MarigoldFX.glow(Color(1.0, 0.65, 0.12), 1.8)
 	drift.draw_pass_1 = dquad
 	add_child(drift)
 	drift.emitting = true

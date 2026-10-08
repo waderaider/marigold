@@ -205,7 +205,7 @@ func _build_plaza() -> void:
 	spray.process_material = spm
 	var squint := QuadMesh.new()
 	squint.size = Vector2(0.03, 0.03)
-	squint.material_override = MarigoldFX.glow(Color(0.55, 0.90, 1.0), 2.2)
+	squint.material = MarigoldFX.glow(Color(0.55, 0.90, 1.0), 2.2)
 	spray.draw_pass_1 = squint
 	fountain.add_child(spray)
 	spray.emitting = true
