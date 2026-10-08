@@ -106,6 +106,9 @@ func _ready() -> void:
 	# Warm light shafts cutting through the canopy.
 	for gz in [0.0, -4.0, -8.0, -12.0]:
 		MarigoldFX.make_god_ray(self, Vector3(0.8, 0, gz), 8.0, Color(1.0, 0.72, 0.35))
+	# v0.6.0: dust motes drifting inside the god-ray shafts (the air was empty).
+	for gz2 in [0.0, -4.0, -8.0, -12.0]:
+		MarigoldFX.spawn_ambient_motes(self, Vector3(0.8, 3.0, gz2), 1.2, 22)
 	MarigoldFX.make_light_rig(self, 0.9)
 
 

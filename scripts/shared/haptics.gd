@@ -89,3 +89,26 @@ static func heartbeat(times: int = 2) -> void:
 			await t.create_timer(0.28).timeout
 			pulse(0.55, 0.10)
 			await t.create_timer(0.5).timeout
+
+
+## ---- Character-system haptics (v0.6.0) ----
+## Event-driven only: blinks are SILENT (no haptics on blink - taste rule).
+
+## Eye-contact lock: soft single blip on the hand nearest the character.
+static func gaze_lock(hand: int = -1) -> void:
+	pulse(0.3, 0.06, hand)
+
+
+## Wink: texture tick routed to the nearest hand.
+static func wink_tick(hand: int = -1) -> void:
+	pulse(0.22, 0.03, hand)
+
+
+## Pet bliss: low soft wave (a purr, not a rumble).
+static func purr(duration: float = 0.8) -> void:
+	pulse(0.25, duration)
+
+
+## Crowd gasp: sub-bass lite under the bow moment.
+static func gasp_rumble() -> void:
+	pulse(0.6, 0.5)

@@ -738,6 +738,10 @@ func _finish() -> void:
 		_plaque_title.text = "The Crossing"
 		_plaque_body.text = "You have crossed the bridge of petals. The celebration continues in the Land of the Dead."
 	_toast("The spirit gate opens!", 3.5)
+	# v0.6.0: crossing earns the pan de muerto memory + festival moment.
+	if MarigoldOfrenda.collect("pan"):
+		_toast("Memory kept: Pan de Muerto - for your ofrenda", 4.0)
+	MarigoldPhotos.note_moment("bridge_cross")
 	# Second beat: expanding spirit-gate shockwaves + rising chime arpeggio.
 	for k in 3:
 		_spawn_shockwave(_far_arch.global_position + Vector3(0, 1.6, 0), float(k) * 0.35)

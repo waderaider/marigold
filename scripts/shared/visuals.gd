@@ -122,6 +122,46 @@ static func spawn_sparks(parent: Node, pos: Vector3, color: Color = Color(1.0, 0
 	return p
 
 
+## Eye-contact sparkle (v0.6.0): 8-particle star burst at the "it sees me"
+## beat. Pooled (4 systems, round-robin) - zero allocation after warmup.
+static var _sparkle_pool: Array = []
+static var _sparkle_idx := 0
+
+static func eye_sparkle(parent: Node, pos: Vector3, color: Color = Color(1.0, 0.9, 0.6)) -> void:
+	if _sparkle_pool.size() < 4:
+		for i in 4:
+			var p := GPUParticles3D.new()
+			p.amount = 8
+			p.lifetime = 0.5
+			p.one_shot = true
+			p.explosiveness = 0.95
+			var mat := ParticleProcessMaterial.new()
+			mat.direction = Vector3(0, 1, 0)
+			mat.spread = 180.0
+			mat.initial_velocity_min = 0.4
+			mat.initial_velocity_max = 1.2
+			mat.gravity = Vector3.ZERO
+			mat.scale_min = 0.015
+			mat.scale_max = 0.035
+			mat.color = color
+			p.process_material = mat
+			var quad := QuadMesh.new()
+			quad.size = Vector2(0.04, 0.04)
+			quad.material = glow(color, 2.4)
+			p.draw_pass_1 = quad
+			p.emitting = false
+			_sparkle_pool.append(p)
+	var p2: GPUParticles3D = _sparkle_pool[_sparkle_idx]
+	_sparkle_idx = (_sparkle_idx + 1) % 4
+	if p2.get_parent() != parent:
+		if p2.get_parent() != null:
+			p2.get_parent().remove_child(p2)
+		parent.add_child(p2)
+	p2.position = pos
+	p2.restart()
+	p2.emitting = true
+
+
 ## Confetti burst (slower, colorful, low gravity).
 static func spawn_confetti(parent: Node, pos: Vector3, amount: int = 60) -> GPUParticles3D:
 	var p := GPUParticles3D.new()

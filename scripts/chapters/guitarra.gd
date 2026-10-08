@@ -126,6 +126,9 @@ var _string_z := 0.11
 var _string_base_z := 0.11
 var _note_z := -1.79
 var _title_y := 3.35
+# v0.6.0: lean-in warmth glow + perfect-strum flash.
+var _hole_glow_mat: StandardMaterial3D = null
+var _perfect_flash := 0.0
 
 var _score_label: Label3D
 var _judge_label: Label3D
@@ -211,6 +214,30 @@ func _process(delta: float) -> void:
 			_update_free(delta)
 	_update_string_vib(delta)
 	_update_petal_wind()
+	_update_guitar_lean(delta) # v0.6.0: lean-in warmth + tip toward player
+
+
+## v0.6.0: guitar lean-in. Player leans close -> sound-hole glow warms and
+## the guitar tips toward the player (a CURIOUS read, ~10 lines).
+func _update_guitar_lean(delta: float) -> void:
+	if _guitar == null or not is_instance_valid(_guitar):
+		return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var d: float = cam.global_position.distance_to(_guitar.global_position + Vector3(0, 1.2, 0))
+	var near := clampf(1.0 - (d - 0.8) / 1.2, 0.0, 1.0)
+	if _hole_glow_mat != null and is_instance_valid(_hole_glow_mat):
+		_hole_glow_mat.emission_energy_multiplier = 0.6 + near * 2.4
+	var k := clampf(4.0 * delta, 0.0, 1.0)
+	_guitar.rotation.x = lerpf(_guitar.rotation.x, near * 0.12, k)
+	# Perfect-strum flash decay on the strum bar.
+	if _perfect_flash > 0.0:
+		_perfect_flash = maxf(0.0, _perfect_flash - delta * 3.0)
+		if is_instance_valid(_strum_bar):
+			var m := _strum_bar.material_override as StandardMaterial3D
+			if m != null:
+				m.emission_energy_multiplier = 2.2 + _perfect_flash * 4.0
 
 
 ## ---------------- wind integration (v0.4.0) ----------------
@@ -391,6 +418,19 @@ func _build_guitar() -> void:
 	_strum_bar.position = Vector3(0, STRUM_Y, _string_z + 0.01)
 	root.add_child(_strum_bar)
 
+	# v0.6.0: sound-hole warmth glow (drives the lean-in moment).
+	_hole_glow_mat = MarigoldFX.glow(Color(1.0, 0.55, 0.15), 0.6)
+	var hg := MeshInstance3D.new()
+	var hgm := CylinderMesh.new()
+	hgm.top_radius = 0.10
+	hgm.bottom_radius = 0.10
+	hgm.height = 0.012
+	hg.mesh = hgm
+	hg.material_override = _hole_glow_mat
+	hg.rotation_degrees.x = 90.0
+	hg.position = Vector3(0, 0.90, _string_z + 0.015)
+	root.add_child(hg)
+
 	var title := MarigoldFX.make_label("Guitarra Mexicana", 64, Color(1.0, 0.80, 0.40))
 	title.position = Vector3(0, _title_y, 0)
 	root.add_child(title)
@@ -485,6 +525,34 @@ func _build_guitar_procedural(root: Node3D) -> void:
 		fmi.material_override = MarigoldFX.glow(Color(0.9, 0.75, 0.45), 0.8)
 		fmi.position = Vector3(0, 1.25 + f * 0.22, 0)
 		root.add_child(fmi)
+	# v0.6.0: mother-of-pearl position dots on the fretboard + rosette detail.
+	var pearl := StandardMaterial3D.new()
+	pearl.albedo_color = Color(0.92, 0.94, 0.96)
+	pearl.metallic = 0.1
+	pearl.roughness = 0.15
+	pearl.emission_enabled = true
+	pearl.emission = Color(0.85, 0.90, 0.95)
+	pearl.emission_energy_multiplier = 0.35
+	for fi in [2, 4, 6, 8, 10]:
+		var dot := MeshInstance3D.new()
+		var dm := CylinderMesh.new()
+		dm.top_radius = 0.016
+		dm.bottom_radius = 0.016
+		dm.height = 0.006
+		dot.mesh = dm
+		dot.material_override = pearl
+		dot.rotation_degrees.x = 90.0
+		dot.position = Vector3(0, 1.14 + float(fi) * 0.11, 0.045)
+		root.add_child(dot)
+	# Rosette: second decorative ring + wood-grain roughness variation.
+	var ros2 := MeshInstance3D.new()
+	var rm2 := TorusMesh.new()
+	rm2.inner_radius = 0.19
+	rm2.outer_radius = 0.21
+	ros2.mesh = rm2
+	ros2.material_override = MarigoldFX.pbr(Color(0.30, 0.16, 0.07), 0.0, 0.6)
+	ros2.position = Vector3(0, 0.72, 0.10)
+	root.add_child(ros2)
 
 	_string_z = 0.11
 	_note_z = -1.79
@@ -757,6 +825,9 @@ func _on_strum() -> void:
 		_perfects += 1
 		_score += 300
 		_set_judge("Perfect!", Color(1.0, 0.85, 0.30))
+		# v0.6.0: great strum = string flash + fanfare.
+		_perfect_flash = 1.0
+		MarigoldHaptics.fanfare()
 	else:
 		_score += 100
 		_set_judge("Good", Color(0.55, 0.95, 0.55))
@@ -777,6 +848,9 @@ func _finish_rhythm() -> void:
 	_score_label.text = "Score %d\nAccuracy %d%%\nBest combo %d" % [_score, int(acc), _max_combo]
 	_set_judge("Bravo!", Color(1.0, 0.80, 0.35))
 	MarigoldFX.spawn_confetti(self, Vector3(0, 2.2, -1.4), 60)
+	# v0.6.0: finishing a song earns the guitar-pick memory object.
+	if MarigoldOfrenda.collect("pick"):
+		_set_judge("Bravo! Memory kept: Guitar Pick", Color(1.0, 0.80, 0.35))
 	_show_results_orbs()
 
 

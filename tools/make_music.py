@@ -353,9 +353,72 @@ def make_finale():
     finalize(mix, bars * bar, "finale")
 
 
+# ============================================================ stingers (v0.6.0)
+# One-shot SFX for the character face system. All original, <1.2 s each.
+
+def finalize_oneshot(mix, seconds, name):
+    """No loop crossfade; 30 ms fade-out tail; normalize to -3 dB."""
+    b = mix.buf
+    total = len(b)
+    fade = int(0.03 * SR)
+    for i in range(fade):
+        w = 1.0 - i / fade
+        b[total - fade + i] *= w
+    peak = max(max(b), -min(b), 1e-9)
+    target = 10.0 ** (-3.0 / 20.0)
+    s = target / peak
+    frames = struct.pack("<%dh" % total,
+                         *[int(max(-32768, min(32767, v * s * 32767)))
+                           for v in b])
+    os.makedirs(OUT_DIR, exist_ok=True)
+    path = os.path.join(OUT_DIR, name + ".wav")
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SR)
+        wf.writeframes(frames)
+    print("wrote %s: %.2fs, %d bytes" % (path, total / SR, os.path.getsize(path)))
+
+
+def make_stingers():
+    # gasp: crowd inhale swell - filtered-noise rise + soft major chord.
+    m = Mix(1.1)
+    n = int(0.8 * SR)
+    lp = 0.0
+    for i in range(n):
+        t = i / SR
+        x = random.uniform(-1.0, 1.0)
+        lp += 0.06 * (x - lp)
+        env = math.sin(math.pi * min(1.0, t / 0.8)) ** 1.5
+        m.buf[i] += (x - lp) * env * 0.5
+    for k, midi in enumerate([60, 64, 67]):  # C4 E4 G4, soft major
+        m.add(ks(mtof(midi), 0.9, damp=0.9985), 0.10 + k * 0.05, 0.30)
+    finalize_oneshot(m, 1.1, "stinger_gasp")
+
+    # wink: high Karplus-Strong pluck pair E6 -> B6.
+    m = Mix(0.7)
+    m.add(ks(mtof(88), 0.35, damp=0.996), 0.0, 0.6)
+    m.add(ks(mtof(95), 0.45, damp=0.996), 0.14, 0.6)
+    finalize_oneshot(m, 0.7, "stinger_wink")
+
+    # greet: warm 3-note folk motif, strummed.
+    m = Mix(1.2)
+    strum(m, [60, 64, 67, 72], 0.05, dur=1.0, damp=0.996, gain=0.7)
+    m.add(membrane(140.0, 70.0, 0.3), 0.0, 0.35)
+    finalize_oneshot(m, 1.2, "stinger_greet")
+
+    # bow_drum: low hand-drum + bright chime.
+    m = Mix(1.0)
+    m.add(membrane(110.0, 48.0, 0.5), 0.0, 0.9)
+    m.add(slap(0.10), 0.02, 0.4)
+    m.add(ks(mtof(84), 0.8, damp=0.9992), 0.12, 0.45)
+    finalize_oneshot(m, 1.0, "stinger_bow_drum")
+
+
 if __name__ == "__main__":
     make_tender()
     make_wondrous()
     make_festive()
     make_finale()
+    make_stingers()
     print("done")

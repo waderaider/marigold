@@ -55,6 +55,12 @@ var _leader_arm_r: Node3D = null
 var _leader_al_target := Vector3(0, 0, -0.3)
 var _leader_ar_target := Vector3(0, 0, 0.3)
 var _leader_lean_target := Vector3.ZERO
+# v0.6.0: leader face rig, street band, ofrenda shelf, teleport pad.
+var _leader_rig: MarigoldCharacterRig = null
+var _band: Array = []
+var _ofrenda_shelf: Node3D = null
+var _teleport_pads: Array = []
+var _finale_locked := false
 
 var _phase := "intro" # intro, demo, do, cheer, finale, done
 var _phase_t := 0.0
@@ -99,6 +105,10 @@ func setup(ar_mode: bool) -> void:
 	_build_stage()
 	_build_crowd()
 	_build_leader()
+	_build_band() # v0.6.0: ambient skeleton street musicians
+	_build_ofrenda_shelf() # v0.6.0: the player's own ofrenda
+	_build_flower_rim() # v0.6.0: real marigold ring around the stage
+	_build_teleport_pad() # v0.6.0: petal-arc teleport to the dance floor
 	_build_labels()
 	_build_plaque()
 	# Ambient life pass (v0.5.0): butterflies + horizon spirits like ch1/ch2.
@@ -318,7 +328,8 @@ func _build_stage() -> void:
 func _build_crowd() -> void:
 	for i in 9:
 		var accent: Color = DANCER_COLORS[i % DANCER_COLORS.size()]
-		var d := _make_skeleton(accent, _rng.randf_range(0.92, 1.08), false)
+		# v0.6.0 crowd variety: wider height band than 0.92-1.08.
+		var d := _make_skeleton(accent, _rng.randf_range(0.85, 1.18), false, 100 + i)
 		var root: Node3D = d["root"]
 		var a := TAU * float(i) / 9.0 + 0.18
 		var pos := STAGE_CENTER + Vector3(cos(a) * 1.9, STAGE_TOP_Y, sin(a) * 1.9)
@@ -327,12 +338,39 @@ func _build_crowd() -> void:
 		var base_rot := atan2(to_center.x, to_center.z)
 		root.rotation.y = base_rot
 		_world.add_child(root)
+		# 3 dancers get the leader's sombrero treatment (v0.6.0 variety).
+		if i % 3 == 0:
+			_add_sombrero(d["body"], accent)
 		_dancers.append({
-			"root": root, "body": d["body"],
-			"arm_l": d["arm_l"], "arm_r": d["arm_r"],
+			"root": root, "body": d["body"], "rig": d.get("rig"),
+			"arm_l": d.get("arm_l"), "arm_r": d.get("arm_r"),
 			"phase": _rng.randf() * TAU, "speed": _rng.randf_range(1.6, 2.4),
 			"style": i % 3, "base_y": STAGE_TOP_Y, "base_rot": base_rot,
 		})
+
+
+## Small sombrero for crowd variety (model-space: body is scaled 2.64x).
+func _add_sombrero(body: Node3D, accent: Color) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	var brim := MeshInstance3D.new()
+	var bm := CylinderMesh.new()
+	bm.top_radius = 0.15
+	bm.bottom_radius = 0.16
+	bm.height = 0.015
+	bm.radial_segments = 20
+	brim.mesh = bm
+	brim.material_override = MarigoldFX.pbr(Color(0.50, 0.30, 0.13), 0.0, 0.7)
+	brim.position = Vector3(0, 0.70, 0)
+	body.add_child(brim)
+	var crown := MeshInstance3D.new()
+	var cm := SphereMesh.new()
+	cm.radius = 0.06
+	cm.height = 0.10
+	crown.mesh = cm
+	crown.material_override = MarigoldFX.pbr(accent, 0.1, 0.5)
+	crown.position = Vector3(0, 0.75, 0)
+	body.add_child(crown)
 
 
 func _build_leader() -> void:
@@ -358,13 +396,136 @@ func _build_leader() -> void:
 	plat_trim.position = Vector3(0, STAGE_TOP_Y + 0.5, -4.7)
 	_world.add_child(plat_trim)
 
-	var d := _make_skeleton(Color(1.0, 0.25, 0.20), 1.35, true)
+	var d := _make_skeleton(Color(1.0, 0.25, 0.20), 1.35, true, 7)
 	_leader = d["root"]
 	_leader_body = d["body"]
 	_leader_arm_l = d["arm_l"]
 	_leader_arm_r = d["arm_r"]
 	_leader.position = Vector3(0, STAGE_TOP_Y + 0.5, -4.7)
 	_world.add_child(_leader)
+	# v0.6.0: the leader's face finally moves - blink + look-at + beat jaw.
+	_leader_rig = MarigoldCharacterRig.attach_face(_leader_body, {
+		"eyes": [d["eye_l"], d["eye_r"]],
+		"head": d["face_pivot"],
+		"jaw": d["jaw_pivot"],
+		"pupils": true,
+		"glow": Color(1.0, 0.60, 0.12), "glow_energy": 2.4,
+		"seed": 7,
+	})
+	_leader_rig.set_gaze_mode(MarigoldCharacterRig.LOOK_PLAYER)
+
+
+## ---------------- v0.6.0 systems ----------------
+
+func _rig_ctx() -> Dictionary:
+	var ctx := MarigoldCharacterRig.default_ctx(self)
+	ctx["hands"] = [
+		MarigoldHands.pointer_position(self, MarigoldHands.HAND_LEFT),
+		MarigoldHands.pointer_position(self, MarigoldHands.HAND_RIGHT),
+	]
+	ctx["on_eye_contact"] = Callable(self, "_on_eye_contact")
+	return ctx
+
+
+func _on_eye_contact(rig: MarigoldCharacterRig) -> void:
+	MarigoldHaptics.gaze_lock()
+	MarigoldFX.eye_sparkle(_world, rig.face_world_pos())
+	var m = _music()
+	if m != null and m.has_method("chime"):
+		m.call("chime", 88, 0.35)
+
+
+## Ambient street band (finding 7): 3 musicians under one umbrella at the
+## plaza edge. Hard cap respected (3 here + 3 in ch3 = 6 total).
+func _build_band() -> void:
+	var accents := [Color(1.0, 0.45, 0.20), Color(0.30, 0.80, 1.0), Color(1.0, 0.75, 0.25)]
+	var umb := MarigoldBanda.make_umbrella(Color(1.0, 0.35, 0.55))
+	umb.position = Vector3(3.6, 0, -1.2)
+	_world.add_child(umb)
+	for i in 3:
+		var d := MarigoldBanda.make_musician(accents[i], i, 500 + i, {"pupils": false})
+		var root: Node3D = d["root"]
+		root.position = Vector3(3.0 + float(i) * 0.65, 0, -1.2)
+		root.rotation.y = -0.5
+		_world.add_child(root)
+		d["base_y"] = 0.0
+		_band.append(d)
+
+
+func _update_band(delta: float) -> void:
+	if _band.is_empty():
+		return
+	var ctx := _rig_ctx()
+	var m = _music()
+	for d in _band:
+		MarigoldBanda.update_musician(d, delta, ctx, m)
+
+
+## The player's own ofrenda shelf (finding 8): collected memory objects
+## appear here as the journey progresses.
+func _build_ofrenda_shelf() -> void:
+	_ofrenda_shelf = MarigoldOfrenda.make_shelf()
+	_ofrenda_shelf.position = Vector3(-3.4, 0, -2.2)
+	_ofrenda_shelf.rotation.y = 0.5
+	_world.add_child(_ofrenda_shelf)
+
+
+## Stage rim: a real marigold flower ring (one MultiMesh = 1 draw call)
+## around the glowing torus (v0.6.0 art punch-list).
+func _build_flower_rim() -> void:
+	var blossom := SphereMesh.new()
+	blossom.radius = 0.09
+	blossom.height = 0.12
+	blossom.radial_segments = 8
+	blossom.rings = 4
+	blossom.material = MarigoldFX.glow(Color(1.0, 0.55, 0.08), 1.8)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = blossom
+	var count := 28
+	mm.instance_count = count
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	for i in count:
+		var a := TAU * float(i) / float(count)
+		var r := 3.35 + rng.randf_range(-0.08, 0.08)
+		var s := rng.randf_range(0.9, 1.5)
+		mm.set_instance_transform(i, Transform3D(
+			Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s, s)),
+			STAGE_CENTER + Vector3(cos(a) * r, STAGE_TOP_Y + 0.10, sin(a) * r)))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	_world.add_child(mmi)
+
+
+## Teleport pad (finding 3): pinch to ride a petal arc to the dance floor.
+func _build_teleport_pad() -> void:
+	var pad := MarigoldTeleport.make_pad("Dance Floor")
+	pad.position = Vector3(0, 0.02, 1.8)
+	_world.add_child(pad)
+	_teleport_pads.append({"node": pad, "target": STAGE_CENTER + Vector3(0, 0, 1.2)})
+
+
+func _update_teleport_pads(delta: float) -> void:
+	MarigoldTeleport.update(self, delta)
+	for p in _teleport_pads:
+		var pad: Node3D = p["node"]
+		if pad == null or not is_instance_valid(pad):
+			continue
+		MarigoldTeleport.pulse_pad(pad, _t)
+		for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+			if MarigoldHands.pinch_active(self, hand) \
+					and pad.global_position.distance_to(
+						MarigoldHands.pointer_position(self, hand)) < 0.45:
+				var target_world: Vector3 = _world.to_global(p["target"])
+				if MarigoldTeleport.begin(self, _world, target_world):
+					_toast_pad("¡Vamos!")
+				break
+
+
+func _toast_pad(text: String) -> void:
+	if _label_hint != null and is_instance_valid(_label_hint):
+		_label_hint.text = text
 
 
 func _build_labels() -> void:
@@ -408,66 +569,16 @@ func _build_plaque() -> void:
 
 ## ---- Skeleton builder (original festive designs) ----
 
-## v0.2.0: crowd dancer built on the real Kenney skeleton model (CC0).
-## Whole-body dance animation (bob/sway/spin); no arm pivots needed.
-func _make_model_dancer(accent: Color, dancer_scale: float) -> Dictionary:
-	var root := Node3D.new()
-	root.name = "Celebrant"
-	var skel := MarigoldModels.instance(MarigoldModels.GRAVEYARD, "character-skeleton")
-	var body := Node3D.new()
-	body.name = "Body"
-	root.add_child(body)
-	if skel != null:
-		# Bone-white with a warm tint; the model's own textures get overridden
-		# for a consistent calavera look.
-		MarigoldModels.recolor(skel, Color(0.93, 0.87, 0.74), 0.0, 0.55)
-		body.add_child(skel)
-		# Glowing marigold eyes (model space: head near the top).
-		var eye_m := MarigoldFX.glow(Color(1.0, 0.60, 0.12), 2.6)
-		for sx in [-1.0, 1.0]:
-			var eye := MeshInstance3D.new()
-			var em := SphereMesh.new()
-			em.radius = 0.022
-			em.height = 0.04
-			eye.mesh = em
-			eye.material_override = eye_m
-			eye.position = Vector3(0.055 * sx, 0.615, 0.105)
-			skel.add_child(eye)
-		# Marigold garland around the neck (model space).
-		for gi in 8:
-			var ga := TAU * float(gi) / 8.0
-			var bead := MeshInstance3D.new()
-			var gm := SphereMesh.new()
-			gm.radius = 0.020
-			gm.height = 0.035
-			bead.mesh = gm
-			bead.material_override = MarigoldFX.glow(Color(1.0, 0.60, 0.10), 2.0) if gi % 2 == 0 else MarigoldFX.pbr(accent, 0.1, 0.5)
-			bead.position = Vector3(cos(ga) * 0.115, 0.50, sin(ga) * 0.115)
-			skel.add_child(bead)
-		# Accent sash: glowing band across the ribcage.
-		var sash := MeshInstance3D.new()
-		var sm := TorusMesh.new()
-		sm.inner_radius = 0.13
-		sm.outer_radius = 0.16
-		sm.rings = 20
-		sm.ring_segments = 8
-		sash.mesh = sm
-		sash.material_override = MarigoldFX.glow(accent, 1.4)
-		sash.position = Vector3(0, 0.38, 0)
-		sash.rotation_degrees.x = 12.0
-		skel.add_child(sash)
-	# Scale the 0.72m model up to dancer height.
-	body.scale = Vector3.ONE * 2.64
-	root.scale = Vector3.ONE * dancer_scale
-	return {"root": root, "body": body, "arm_l": null, "arm_r": null}
-
-
-func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dictionary:
-	# v0.2.0: crowd dancers use the real Kenney skeleton model (CC0) -
-	# no more sphere-stack blobs. The leader keeps its articulated arms
-	# (the copy-me game needs animated arm poses).
+func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool, seed: int = 0) -> Dictionary:
+	# Crowd dancers: the shared Kenney-skeleton troupe (v0.6.0 faces via
+	# MarigoldCharacterRig: blink + jaw plate; no rings/pupils on the crowd
+	# keeps the face-system draw-call delta inside the +14 budget).
 	if not is_leader:
-		return _make_model_dancer(accent, dancer_scale)
+		var cd := MarigoldCalavera.make_dancer(accent, dancer_scale,
+			{"ring": false, "pupils": false, "jaw": true, "seed": seed})
+		cd["arm_l"] = null
+		cd["arm_r"] = null
+		return cd
 	var root := Node3D.new()
 	root.name = "Celebrant"
 	var bone := MarigoldFX.pbr(Color(0.93, 0.88, 0.76), 0.0, 0.55)
@@ -478,6 +589,13 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 	body.name = "Body"
 	root.add_child(body)
 
+	# Face pivot: skull + eyes + jaw + hat turn as one to look at the
+	# player - the rig's look-at target (v0.6.0).
+	var face := Node3D.new()
+	face.name = "FacePivot"
+	face.position = Vector3(0, 1.62, 0)
+	body.add_child(face)
+
 	# Skull (slightly squashed sphere).
 	var skull := MeshInstance3D.new()
 	var skull_mesh := SphereMesh.new()
@@ -486,10 +604,11 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 	skull_mesh.material = bone
 	skull.mesh = skull_mesh
 	skull.scale = Vector3(1.0, 0.88, 0.95)
-	skull.position = Vector3(0, 1.62, 0)
-	body.add_child(skull)
+	skull.position = Vector3.ZERO
+	face.add_child(skull)
 
 	# Glowing marigold eyes.
+	var eye_nodes := []
 	for sx in [-1.0, 1.0]:
 		var eye := MeshInstance3D.new()
 		var em := SphereMesh.new()
@@ -497,19 +616,24 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 		em.height = 0.07
 		em.material = eye_m
 		eye.mesh = em
-		eye.position = Vector3(0.062 * sx, 1.64, 0.125)
-		body.add_child(eye)
+		eye.position = Vector3(0.062 * sx, 0.02, 0.125)
+		face.add_child(eye)
+		eye_nodes.append(eye)
 
-	# Jaw.
+	# Jaw on a hinge pivot (v0.6.0: finally animated - beat-synced).
+	var jaw_pivot := Node3D.new()
+	jaw_pivot.name = "JawPivot"
+	jaw_pivot.position = Vector3(0, -0.10, 0.03)
+	face.add_child(jaw_pivot)
 	var jaw := MeshInstance3D.new()
 	var jm := BoxMesh.new()
 	jm.size = Vector3(0.14, 0.07, 0.10)
 	jm.material = bone
 	jaw.mesh = jm
-	jaw.position = Vector3(0, 1.50, 0.045)
-	body.add_child(jaw)
+	jaw.position = Vector3(0, -0.03, 0.015)
+	jaw_pivot.add_child(jaw)
 
-	# Festive hat for the leader: wide brim + crown.
+	# Festive hat for the leader: wide brim + crown (rides the face pivot).
 	if is_leader:
 		var brim := MeshInstance3D.new()
 		var bm := CylinderMesh.new()
@@ -519,8 +643,8 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 		bm.radial_segments = 32
 		bm.material = accent_m
 		brim.mesh = bm
-		brim.position = Vector3(0, 1.80, 0)
-		body.add_child(brim)
+		brim.position = Vector3(0, 0.18, 0)
+		face.add_child(brim)
 		var crown := MeshInstance3D.new()
 		var cm := SphereMesh.new()
 		cm.radius = 0.15
@@ -528,8 +652,8 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 		cm.material = accent_m
 		crown.mesh = cm
 		crown.scale = Vector3(1.0, 0.85, 1.0)
-		crown.position = Vector3(0, 1.90, 0)
-		body.add_child(crown)
+		crown.position = Vector3(0, 0.28, 0)
+		face.add_child(crown)
 
 	# Marigold garland around the neck.
 	for g in 8:
@@ -637,7 +761,9 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool) -> Dict
 		hip.add_child(foot)
 
 	root.scale = Vector3.ONE * dancer_scale
-	return {"root": root, "body": body, "arm_l": arm_l, "arm_r": arm_r}
+	return {"root": root, "body": body, "arm_l": arm_l, "arm_r": arm_r,
+		"face_pivot": face, "jaw_pivot": jaw_pivot,
+		"eye_l": eye_nodes[0], "eye_r": eye_nodes[1]}
 
 
 ## ---- Game flow ----
@@ -652,6 +778,9 @@ func _process(delta: float) -> void:
 
 	_update_dancers(delta)
 	_update_leader(delta)
+	_update_band(delta) # v0.6.0: street musicians react to the player
+	_update_teleport_pads(delta)
+	MarigoldCharacterRig.update_all(delta, _rig_ctx()) # v0.6.0: faces
 	_update_candles()
 	_update_ghosts(delta)
 	_update_wind_fx() # banners ripple, rim candle flames dance with gusts
@@ -788,6 +917,20 @@ func _start_finale() -> void:
 	_leader_al_target = Vector3(0.6, 0, -0.5)
 	_leader_ar_target = Vector3(0.6, 0, 0.5)
 	_leader_lean_target = Vector3(0.65, 0, 0)
+	# v0.6.0 beat-drop lock: pupils lock onto the player, head tilts
+	# CURIOUS, jaw opens in a grin, trumpet-ish sting.
+	if not _finale_locked and _leader_rig != null:
+		_finale_locked = true
+		var cam := get_viewport().get_camera_3d()
+		if cam != null:
+			_leader_rig.snap_look(cam.global_position)
+		_leader_rig.set_expression("CURIOUS", 0.4)
+		_leader_rig.set_jaw_hold(0.8, 2.5)
+		MarigoldHaptics.gaze_lock()
+		var m = _music()
+		if m != null and m.has_method("chime"):
+			m.call("chime", 79, 0.8)
+		MarigoldPhotos.note_moment("baile_finale")
 
 
 func _update_finale(delta: float) -> void:
@@ -954,6 +1097,16 @@ func _update_leader(delta: float) -> void:
 	# Wave oscillation during the "Wave hello!" demo.
 	if _move_idx == 2 and (_phase == "demo" or _phase == "do"):
 		_leader_arm_r.rotation.z += sin(_t * 8.0) * 0.35
+	# v0.6.0: the leader talks while teaching, sings on the beat at the finale.
+	if _leader_rig != null:
+		var teaching := _phase == "demo" or _phase == "do"
+		var performing := _phase == "cheer" or _phase == "finale"
+		_leader_rig.set_speaking(teaching and not performing)
+		_leader_rig.set_singing(performing)
+		if performing and _phase == "cheer":
+			_leader_rig.set_expression("JOY", 0.8)
+		elif teaching:
+			_leader_rig.set_expression("HAPPY", 0.8)
 
 
 func _update_candles() -> void:

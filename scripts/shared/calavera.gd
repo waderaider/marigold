@@ -8,27 +8,34 @@ extends RefCounted
 class_name MarigoldCalavera
 
 
-## Build a dressed skeleton dancer. Returns {"root": Node3D, "body": Node3D}.
-static func make_dancer(accent: Color, dancer_scale: float = 1.0) -> Dictionary:
+## Build a dressed skeleton dancer. Returns {"root": Node3D, "body": Node3D,
+## "rig": MarigoldCharacterRig}. The face kit (eyes/pupils/rings/jaw) is built
+## by MarigoldCharacterRig from SHARED static meshes - no per-eye allocation.
+## face_opts: {"ring": bool, "pupils": bool, "jaw": bool, "seed": int}.
+static func make_dancer(accent: Color, dancer_scale: float = 1.0, face_opts: Dictionary = {}) -> Dictionary:
 	var root := Node3D.new()
 	root.name = "Calavera"
 	var skel: Node3D = MarigoldModels.instance(MarigoldModels.GRAVEYARD, "character-skeleton")
 	var body := Node3D.new()
 	body.name = "Body"
 	root.add_child(body)
+	var rig: MarigoldCharacterRig = null
 	if skel != null:
 		MarigoldModels.recolor(skel, Color(0.93, 0.87, 0.74), 0.0, 0.55)
 		body.add_child(skel)
-		var eye_m := MarigoldFX.glow(Color(1.0, 0.60, 0.12), 2.6)
-		for sx in [-1.0, 1.0]:
-			var eye := MeshInstance3D.new()
-			var em := SphereMesh.new()
-			em.radius = 0.022
-			em.height = 0.04
-			eye.mesh = em
-			eye.material_override = eye_m
-			eye.position = Vector3(0.055 * sx, 0.615, 0.105)
-			skel.add_child(eye)
+		# v0.6.0: the face kit replaces the old static glow spheres.
+		rig = MarigoldCharacterRig.build_face(skel, {
+			"eye_positions": [Vector3(-0.055, 0.615, 0.105), Vector3(0.055, 0.615, 0.105)],
+			"eye_radius": 0.022,
+			"glow": Color(1.0, 0.60, 0.12), "glow_energy": 2.6,
+			"face_pos": Vector3(0, 0.60, 0.06),
+			"ring": bool(face_opts.get("ring", true)),
+			"pupils": bool(face_opts.get("pupils", true)),
+			"jaw": bool(face_opts.get("jaw", true)),
+			"jaw_pos": Vector3(0, 0.545, 0.05),
+			"jaw_size": Vector3(0.09, 0.05, 0.08),
+			"seed": int(face_opts.get("seed", 0)),
+		})
 		for gi in 8:
 			var ga := TAU * float(gi) / 8.0
 			var bead := MeshInstance3D.new()
@@ -53,7 +60,7 @@ static func make_dancer(accent: Color, dancer_scale: float = 1.0) -> Dictionary:
 		skel.add_child(sash)
 	body.scale = Vector3.ONE * 2.64 # 0.72 m model -> dancer height
 	root.scale = Vector3.ONE * dancer_scale
-	return {"root": root, "body": body}
+	return {"root": root, "body": body, "rig": rig}
 
 
 ## Beat-synced dance step. Call every frame per dancer.
@@ -118,6 +125,10 @@ static func begin_exit(d: Dictionary, parent: Node) -> void:
 		return
 	d["exiting"] = true
 	d["exit_t"] = 0.0
+	var rig: MarigoldCharacterRig = d.get("rig")
+	if rig != null:
+		rig.detach()
+		d["rig"] = null
 	MarigoldFX.scatter_petals(parent, root.global_position + Vector3(0, 0.9, 0), 18)
 
 

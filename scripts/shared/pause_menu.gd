@@ -334,6 +334,14 @@ func _build_panel() -> void:
 	title.add_theme_font_size_override("font_size", 84)
 	title.add_theme_color_override("font_color", C_MARIGOLD)
 	vb.add_child(title)
+	# v0.6.0: papel-picado header strip (finding 6).
+	var tr := TextureRect.new()
+	tr.texture = MarigoldPapelPicado.banner_texture_2d(4242, 512, 96)
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.custom_minimum_size = Vector2(0, 64)
+	tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(tr)
 
 	_panel_stack = VBoxContainer.new()
 	_panel_stack.add_theme_constant_override("separation", 14)

@@ -22,6 +22,12 @@ const EXPERIENCES := {
 		"desc": "A guided hand-tracking tour: pinch, grab, throw, sculpt", "keyart": "res://assets/keyart/mano_magica.png"},
 	"espejo": {"name": "Gran Baile: Espejo", "scene": "res://scenes/chapters/espejo.tscn", "mood": "finale",
 		"desc": "Mirror dance - your real moves, body tracked", "keyart": "res://assets/keyart/espejo.png"},
+	"pinta": {"name": "Pinta Alebrijes", "scene": "res://scenes/chapters/pinta.tscn", "mood": "festive",
+		"desc": "Paint your own spirit animal - it comes alive", "keyart": "res://assets/keyart/pinta.png"},
+	"galeria": {"name": "Galeria de Recuerdos", "scene": "res://scenes/chapters/galeria.tscn", "mood": "wondrous",
+		"desc": "Your festival moments, framed in papel picado", "keyart": "res://assets/keyart/galeria.png"},
+	"ofrenda_finale": {"name": "Tu Ofrenda", "scene": "res://scenes/chapters/ofrenda_finale.tscn", "mood": "finale",
+		"desc": "Your altar of memories - the candle-lit reveal", "keyart": "res://assets/keyart/ofrenda_finale.png"},
 }
 
 const PROGRESS_FILE := "user://marigold_progress.cfg"
@@ -136,6 +142,15 @@ func _build_menu() -> void:
 		{"key": "espejo", "name": "Gran Baile: Espejo",
 			"desc": "Mirror dance - your real moves, body tracked",
 			"keyart": "res://assets/keyart/espejo.png"},
+		{"key": "pinta", "name": "Pinta Alebrijes",
+			"desc": "Paint your own spirit animal - it comes alive",
+			"keyart": "res://assets/keyart/guitarra.png"},
+		{"key": "galeria", "name": "Galeria de Recuerdos",
+			"desc": "Your festival moments, framed in papel picado",
+			"keyart": "res://assets/keyart/ch1_ofrenda.png"},
+		{"key": "ofrenda_finale", "name": "Tu Ofrenda",
+			"desc": "Your altar of memories - the candle-lit reveal",
+			"keyart": "res://assets/keyart/ch1_ofrenda.png"},
 	])
 	var prog := _load_progress()
 	_menu.set_progress(int(prog.get("current", 0)), prog.get("completed", []))
@@ -310,10 +325,27 @@ func _load_chapter(idx: int) -> void:
 
 
 func _on_chapter_complete() -> void:
-	# Mark the finished chapter, then a petal-fall beat before the next.
+	# Mark the finished chapter, then the scripted flight over the candle-lit
+	# town (v0.6.0: replaces the petal-fall fade-to-black between chapters).
 	_mark_completed(_chapter_index)
-	await _petal_transition()
-	_load_chapter(_chapter_index + 1)
+	var next_idx := _chapter_index + 1
+	if next_idx < 0 or next_idx >= CHAPTERS.size():
+		_load_chapter(next_idx) # journey end card
+		return
+	var from_name := String(CHAPTERS[_chapter_index]["name"])
+	var to_name := String(CHAPTERS[next_idx]["name"])
+	_current_chapter.queue_free()
+	_current_chapter = null
+	var flight := MarigoldFlight.new()
+	flight.finished.connect(_on_flight_done.bind(next_idx))
+	flight.begin(self, from_name, to_name, 16.0)
+
+
+func _on_flight_done(next_idx: int) -> void:
+	for c in get_children():
+		if c is MarigoldFlight:
+			c.queue_free()
+	_load_chapter(next_idx)
 
 
 ## ---- Journey progress (Continue Journey, v0.5.0) ----

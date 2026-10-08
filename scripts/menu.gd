@@ -199,6 +199,72 @@ func _build_panel() -> void:
 	frame.position = QUAD_POS + Vector3(0, 0, -0.01)
 	_panel_root.add_child(frame)
 
+	_build_altar_decor() # v0.6.0: 3D altar decor around the menu panel
+
+
+## v0.6.0 (finding 6): the menu sits on a decorated ofrenda - candle cluster,
+## marigold garland, and a papel-picado arch. Emissive only, zero new lights.
+func _build_altar_decor() -> void:
+	var qx := QUAD_SIZE.x * 0.5
+	# Altar table.
+	var table := MeshInstance3D.new()
+	var tm := BoxMesh.new()
+	tm.size = Vector3(2.4, 0.08, 0.5)
+	table.mesh = tm
+	table.material_override = MarigoldFX.pbr(Color(0.40, 0.22, 0.10), 0.0, 0.7)
+	table.position = QUAD_POS + Vector3(0, -QUAD_SIZE.y * 0.5 - 0.04, 0.15)
+	_panel_root.add_child(table)
+	# Candle cluster (emissive flames, no lights).
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 6006
+	for i in 5:
+		var cx := -0.8 + float(i) * 0.4
+		var stick := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.03
+		sm.bottom_radius = 0.03
+		sm.height = rng.randf_range(0.18, 0.32)
+		stick.mesh = sm
+		stick.material_override = MarigoldFX.pbr(Color(1.0, 0.93, 0.82), 0.0, 0.6)
+		stick.position = table.position + Vector3(cx, 0.15, 0)
+		_panel_root.add_child(stick)
+		var flame := MeshInstance3D.new()
+		var fm := SphereMesh.new()
+		fm.radius = 0.025
+		fm.height = 0.07
+		flame.mesh = fm
+		flame.material_override = MarigoldFX.glow(Color(1.0, 0.62, 0.18), 2.0)
+		flame.position = stick.position + Vector3(0, 0.20, 0)
+		_panel_root.add_child(flame)
+	# Marigold garland across the table front.
+	var blossom := SphereMesh.new()
+	blossom.radius = 0.045
+	blossom.height = 0.06
+	blossom.radial_segments = 8
+	blossom.rings = 4
+	blossom.material = MarigoldFX.glow(Color(1.0, 0.55, 0.08), 1.6)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = blossom
+	mm.instance_count = 16
+	for i in 16:
+		var bx := -1.1 + float(i) * 0.147
+		mm.set_instance_transform(i, Transform3D(Basis(),
+			table.position + Vector3(bx, 0.06, 0.26)))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	_panel_root.add_child(mmi)
+	# Papel-picado arch over the panel.
+	for i in 7:
+		var b := MeshInstance3D.new()
+		var qm2 := QuadMesh.new()
+		qm2.size = Vector2(0.42, 0.22)
+		b.mesh = qm2
+		b.material_override = MarigoldPapelPicado.banner_material(7000 + i)
+		var ax := -qx - 0.1 + float(i) * (2.0 * qx + 0.2) / 6.0
+		b.position = QUAD_POS + Vector3(ax, QUAD_SIZE.y * 0.5 + 0.18, 0.05)
+		_panel_root.add_child(b)
+
 
 func _build_ui() -> void:
 	var root := Control.new()
@@ -230,6 +296,7 @@ func _build_ui() -> void:
 
 	_add_label(_menu_panel, "MARIGOLD", 110, C_MARIGOLD)
 	_add_label(_menu_panel, "A Dia de Muertos Journey", 42, C_CREAM)
+	_add_papel_banner(_menu_panel, 1001) # v0.6.0: papel-picado UI language
 	_add_separator(_menu_panel)
 
 	# Tabs: Journey | Experiences.
@@ -282,6 +349,7 @@ func _build_ui() -> void:
 	_exp_page.add_child(exp_box)
 
 	_add_label(_menu_panel, "Sky & Weather", 38, C_MARIGOLD)
+	_add_papel_banner(_menu_panel, 2002) # v0.6.0: altar-panel settings styling
 	var sky_row := HBoxContainer.new()
 	sky_row.name = "SkyRow"
 	sky_row.add_theme_constant_override("separation", 8)
@@ -307,6 +375,7 @@ func _build_ui() -> void:
 
 	_add_separator(_menu_panel)
 
+	_add_papel_banner(_menu_panel, 3003) # v0.6.0: papel-picado UI language
 	var upd := _make_button("Check for Updates", 38)
 	upd.pressed.connect(func() -> void: updates_requested.emit())
 	_menu_panel.add_child(upd)
@@ -484,6 +553,17 @@ func _add_separator(parent: Control) -> void:
 	var s := HSeparator.new()
 	s.add_theme_stylebox_override("separator", _sep_style())
 	parent.add_child(s)
+
+
+## v0.6.0: papel-picado cut-paper banner strip across the menu (finding 6).
+func _add_papel_banner(parent: Control, seed: int) -> void:
+	var tr := TextureRect.new()
+	tr.texture = MarigoldPapelPicado.banner_texture_2d(seed, 512, 96)
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.custom_minimum_size = Vector2(0, 72)
+	tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(tr)
 
 
 func _sep_style() -> StyleBoxLine:

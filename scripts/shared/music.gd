@@ -127,6 +127,30 @@ func play_thunder(intensity: float = 1.0) -> void:
 	p.finished.connect(p.queue_free)
 
 
+## ---- Character stingers (v0.6.0) ----
+## One-shot SFX for face-system demo moments, synthesized by
+## tools/make_music.py (all original, <1 s, auto-freed like thunder).
+## kinds: "gasp" (crowd inhale, the bow), "wink" (high KS pluck pair),
+## "greet" (warm 3-note folk motif), "bow_drum" (low hand-drum + chime).
+var _stinger_streams: Dictionary = {}
+
+func play_stinger(kind: String, volume_db: float = -6.0) -> void:
+	var stream: AudioStreamWAV = _stinger_streams.get(kind)
+	if stream == null:
+		stream = load(AUDIO_DIR + "stinger_" + kind + ".wav") as AudioStreamWAV
+		if stream == null:
+			push_warning("[MarigoldMusic] missing stinger: " + kind)
+			return
+		_stinger_streams[kind] = stream
+	var p := AudioStreamPlayer.new()
+	p.stream = stream
+	p.volume_db = volume_db
+	p.bus = "Master"
+	add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
+
+
 ## ---- Beat tracking (v0.5.0) ----
 ## The mood loops are fixed-tempo generated WAVs, so the beat phase can be
 ## derived from the playback position. 0.0 = beat start, 1.0 = next beat.

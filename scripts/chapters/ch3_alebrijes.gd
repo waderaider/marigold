@@ -20,7 +20,8 @@ const GUIDE_DEFS := [
 		"glow": Color(1.0, 0.55, 0.15), "feature": "moth_wings",
 		"model": "alebrije_jaguar", "personality": "burst",
 		"wings": ["JaguarWing_L", "JaguarWing_R"], "head": "JaguarHead",
-		"tail": "JaguarTail", "ears": ["JaguarEar_L", "JaguarEar_R"]},
+		"tail": "JaguarTail", "ears": ["JaguarEar_L", "JaguarEar_R"],
+		"eye_parts": ["Jaguar_eye_L", "Jaguar_eye_R"]},
 	{"name": "Tlanetl", "sub": "axolotl-hummingbird",
 		"body": Color(0.95, 0.38, 0.58), "accent": Color(0.35, 0.90, 1.0),
 		"glow": Color(1.0, 0.40, 0.70), "feature": "gills"},
@@ -29,13 +30,17 @@ const GUIDE_DEFS := [
 		"glow": Color(0.30, 1.0, 0.80), "feature": "serpent_tail",
 		"model": "alebrije_serpent", "personality": "rattle",
 		"wings": ["SerpentWing_L", "SerpentWing_R"], "head": "SerpentHead",
-		"tail": "SerpentRattle", "ears": ["SerpentHorn_L", "SerpentHorn_R"]},
+		"tail": "SerpentRattle", "ears": ["SerpentHorn_L", "SerpentHorn_R"],
+		"eye_parts": ["Serpent_eye_L", "Serpent_eye_R"]},
 	{"name": "Papalotl", "sub": "many-eyed deer",
 		"body": Color(0.55, 0.35, 0.95), "accent": Color(1.0, 0.85, 0.35),
 		"glow": Color(0.70, 0.45, 1.0), "feature": "rabbit_ears",
 		"model": "alebrije_deer", "personality": "twitch",
 		"wings": [], "head": "DeerHead",
-		"tail": "DeerTail", "ears": ["DeerEar_L", "DeerEar_R"]},
+		"tail": "DeerTail", "ears": ["DeerEar_L", "DeerEar_R"],
+		"eye_parts": ["DeerBig_eye_L", "DeerBig_eye_R",
+			"DeerMid_eye_L", "DeerMid_eye_R", "DeerSml_eye_L", "DeerSml_eye_R"],
+		"pupil_eyes": ["DeerBig_eye_L", "DeerBig_eye_R"]},
 ]
 
 const BANNER_COLORS := [
@@ -64,6 +69,11 @@ var _has_prev_strum := false
 var _plaque: Node3D
 var _feed_label: Label3D
 var _status_label: Label3D
+# v0.6.0: street band, teleport pads, guide greeting state.
+var _band: Array = []
+var _teleport_pads: Array = []
+var _greeted: Dictionary = {}
+var _ripple_rings: Array = []
 # Wind + physics integration (v0.4.0).
 var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
 var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
@@ -76,6 +86,9 @@ func _ready() -> void:
 	_build_guides()
 	_build_guitar()
 	_build_ui()
+	_build_band() # v0.6.0: ambient skeleton street musicians
+	_build_teleport_pads() # v0.6.0: petal-arc teleport between guides
+	_build_ripple_rings() # v0.6.0: scrolling fountain ripple rings
 	# Ambient life pass (v0.5.0): the plaza breathes like the other chapters.
 	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -2), 8, 5.0)
 	MarigoldAmbient.add_spirits(self, 5, 16.0)
@@ -140,6 +153,10 @@ func _process(delta: float) -> void:
 	_animate_guides(delta)
 	_update_feeding()
 	_update_strum()
+	_update_band(delta) # v0.6.0: street musicians
+	_update_teleport_pads(delta) # v0.6.0: petal-arc teleport
+	_update_ripples(delta) # v0.6.0: fountain ripple rings
+	MarigoldCharacterRig.update_all(delta, _rig_ctx()) # v0.6.0: faces
 	_update_wind_fx() # banners ripple, stall candle flames dance with gusts
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)
@@ -450,6 +467,8 @@ func _build_stall(sd: Dictionary) -> void:
 	# Goods on the counter.
 	match String(sd["goods"]):
 		"fruit":
+			# v0.6.0: matte PBR fruit with a tiny calyx wedge (glow fruit
+			# read as candy - now they read as fruit).
 			var fruit_cols := [Color(1.0, 0.45, 0.10), Color(0.85, 0.15, 0.20), Color(0.45, 0.85, 0.25)]
 			for fi in 9:
 				var fm := SphereMesh.new()
@@ -457,9 +476,17 @@ func _build_stall(sd: Dictionary) -> void:
 				fm.height = 0.13
 				var fmi := MeshInstance3D.new()
 				fmi.mesh = fm
-				fmi.material_override = MarigoldFX.glow(fruit_cols[fi % 3], 1.1)
+				fmi.material_override = MarigoldFX.pbr(fruit_cols[fi % 3], 0.0, 0.55)
 				fmi.position = Vector3(-0.6 + float(fi % 3) * 0.6, 0.97, -0.18 + float(fi / 3) * 0.36)
 				root.add_child(fmi)
+				var cal := MeshInstance3D.new()
+				var cm := BoxMesh.new()
+				cm.size = Vector3(0.03, 0.03, 0.015)
+				cal.mesh = cm
+				cal.material_override = MarigoldFX.pbr(Color(0.15, 0.30, 0.10), 0.0, 0.8)
+				cal.position = fmi.position + Vector3(0, 0.065, 0)
+				cal.rotation.y = float(fi) * 0.7
+				root.add_child(cal)
 				if fi < 3:
 					_make_prop_dynamic(fmi, "sphere", 0.15)
 		"pots":
@@ -503,6 +530,7 @@ func _build_string_lights() -> void:
 		pmi.position = Vector3(p.x, 2.15, p.z)
 		_dressing.add_child(pmi)
 	var bulb_cols := [Color(1.0, 0.72, 0.30), Color(1.0, 0.45, 0.55), Color(0.65, 0.85, 1.0)]
+	var shade_xforms: Array = []
 	for s in 4:
 		var a0: Vector3 = poles[s]
 		var a1: Vector3 = poles[(s + 1) % 4]
@@ -518,6 +546,24 @@ func _build_string_lights() -> void:
 			bmi.material_override = MarigoldFX.glow(bulb_cols[bi % 3], 2.2)
 			bmi.position = pos
 			_dressing.add_child(bmi)
+			# v0.6.0: paper-cup shade above each bulb (authentic mercado look).
+			shade_xforms.append(Transform3D(Basis(), pos + Vector3(0, 0.055, 0)))
+	# One MultiMesh for all 36 shades = 1 draw call.
+	var shade_mesh := CylinderMesh.new()
+	shade_mesh.top_radius = 0.035
+	shade_mesh.bottom_radius = 0.085
+	shade_mesh.height = 0.09
+	shade_mesh.radial_segments = 10
+	shade_mesh.material = MarigoldFX.glow(Color(1.0, 0.80, 0.45), 0.9)
+	var smm := MultiMesh.new()
+	smm.transform_format = MultiMesh.TRANSFORM_3D
+	smm.mesh = shade_mesh
+	smm.instance_count = shade_xforms.size()
+	for i in shade_xforms.size():
+		smm.set_instance_transform(i, shade_xforms[i])
+	var smmi := MultiMeshInstance3D.new()
+	smmi.multimesh = smm
+	_dressing.add_child(smmi)
 
 
 # ---------------------------------------------------------------- distant skyline
@@ -571,6 +617,134 @@ func _build_guides() -> void:
 		g["home_yaw"] = (g["node"] as Node3D).rotation.y
 		g["base_y"] = 0.0
 		_guides.append(g)
+
+
+## ---------------- v0.6.0 systems ----------------
+
+func _rig_ctx() -> Dictionary:
+	var ctx := MarigoldCharacterRig.default_ctx(self)
+	ctx["hands"] = [_hand_point(MarigoldHands.HAND_LEFT), _hand_point(MarigoldHands.HAND_RIGHT)]
+	ctx["on_eye_contact"] = Callable(self, "_on_eye_contact")
+	return ctx
+
+
+func _on_eye_contact(rig: MarigoldCharacterRig) -> void:
+	MarigoldHaptics.gaze_lock()
+	MarigoldFX.eye_sparkle(self, rig.face_world_pos())
+	if MarigoldState.music != null and MarigoldState.music.has_method("chime"):
+		MarigoldState.music.chime(88, 0.3)
+
+
+## Guide greeting (demo moment 4): approaching a guide (< 4 m), its pupils
+## track you; on first approach: slow blink + HAPPY + greeting chime +
+## name toast + talking welcome (syllable fallback drives the jaw).
+func _greet_guide(g: Dictionary) -> void:
+	_greeted = g
+	var rig: MarigoldCharacterRig = g.get("rig")
+	if rig != null:
+		rig.set_expression("HAPPY", 0.5)
+		rig.set_speaking(true)
+		get_tree().create_timer(2.2).timeout.connect(func() -> void:
+			if is_instance_valid(g["node"] as Node3D):
+				rig.set_speaking(false))
+	if MarigoldState.music != null and MarigoldState.music.has_method("play_stinger"):
+		MarigoldState.music.play_stinger("greet", -8.0)
+	_status_label.text = "%s te saluda" % String((g["def"] as Dictionary)["name"])
+	MarigoldFX.eye_sparkle(self, (g["node"] as Node3D).global_position + Vector3(0, 1.1, 0))
+	MarigoldPhotos.note_moment("guide_greet")
+
+
+## Street band (finding 7): 3 musicians under one umbrella at the plaza
+## edge (3 here + 3 in ch5 = the 6-musician hard cap).
+func _build_band() -> void:
+	var accents := [Color(1.0, 0.50, 0.25), Color(0.35, 0.85, 1.0), Color(1.0, 0.80, 0.30)]
+	var umb := MarigoldBanda.make_umbrella(Color(0.30, 0.70, 1.0))
+	umb.position = Vector3(-4.2, 0, 2.8)
+	add_child(umb)
+	for i in 3:
+		var d := MarigoldBanda.make_musician(accents[i], i, 600 + i, {"pupils": false})
+		var root: Node3D = d["root"]
+		root.position = Vector3(-4.7 + float(i) * 0.55, 0, 2.8)
+		root.rotation.y = 0.7
+		add_child(root)
+		d["base_y"] = 0.0
+		_band.append(d)
+
+
+func _update_band(delta: float) -> void:
+	if _band.is_empty():
+		return
+	var ctx := _rig_ctx()
+	for d in _band:
+		MarigoldBanda.update_musician(d, delta, ctx, MarigoldState.music)
+
+
+## Teleport pads (finding 3): petal arcs between the four guides.
+func _build_teleport_pads() -> void:
+	for i in _guides.size():
+		var g: Dictionary = _guides[i]
+		var node: Node3D = g["node"]
+		var pad := MarigoldTeleport.make_pad(String((g["def"] as Dictionary)["name"]))
+		# Pad sits 1.2 m toward the plaza center from the guide.
+		var to_c: Vector3 = (Vector3(0, 0, -1.0) - node.position).normalized()
+		pad.position = node.position + to_c * 1.6 + Vector3(0, 0.02, 0)
+		add_child(pad)
+		_teleport_pads.append({"node": pad, "guide": i})
+
+
+func _update_teleport_pads(delta: float) -> void:
+	MarigoldTeleport.update(self, delta)
+	for p in _teleport_pads:
+		var pad: Node3D = p["node"]
+		if pad == null or not is_instance_valid(pad):
+			continue
+		pad.visible = not _ar_mode
+		if _ar_mode:
+			continue
+		MarigoldTeleport.pulse_pad(pad, _t)
+		for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+			if MarigoldHands.pinch_active(self, hand) \
+					and pad.global_position.distance_to(_hand_point(hand)) < 0.45:
+				var g: Dictionary = _guides[int(p["guide"])]
+				var gp: Vector3 = (g["node"] as Node3D).global_position
+				var to_c: Vector3 = (Vector3(0, 0, -1.0) - gp)
+				to_c.y = 0.0
+				var target: Vector3 = gp + to_c.normalized() * 1.4
+				target.y = 0.0
+				if MarigoldTeleport.begin(self, self, target):
+					_status_label.text = "¡Vamos a %s!" % String((g["def"] as Dictionary)["name"])
+				break
+
+
+## Scrolling fountain ripple rings (v0.6.0 art punch-list): 3 expanding +
+## fading rings on the water, 1 draw call each.
+func _build_ripple_rings() -> void:
+	for i in 3:
+		var ring := MeshInstance3D.new()
+		var rm := TorusMesh.new()
+		rm.inner_radius = 0.28
+		rm.outer_radius = 0.34
+		rm.rings = 32
+		rm.ring_segments = 8
+		ring.mesh = rm
+		ring.material_override = MarigoldFX.glow(Color(0.55, 0.90, 1.0), 1.4)
+		ring.rotation_degrees.x = 90.0
+		ring.position = Vector3(0, 0.58, -1.0)
+		add_child(ring)
+		_ripple_rings.append({"node": ring, "off": float(i) / 3.0})
+
+
+func _update_ripples(delta: float) -> void:
+	for r in _ripple_rings:
+		var n: MeshInstance3D = r["node"]
+		if n == null or not is_instance_valid(n):
+			continue
+		var k := fmod(_t * 0.35 + float(r["off"]), 1.0)
+		var s := 0.4 + k * 1.6
+		n.scale = Vector3(s, s, s)
+		var m := n.material_override as StandardMaterial3D
+		if m != null:
+			m.emission_energy_multiplier = 1.6 * (1.0 - k)
 
 
 func _build_guide(def: Dictionary, idx: int) -> Dictionary:
@@ -635,10 +809,25 @@ func _build_guide(def: Dictionary, idx: int) -> Dictionary:
 		eye.radius = 0.045
 		eye.height = 0.09
 		var eye_mi := MeshInstance3D.new()
+		eye_mi.name = "ProcEye_L" if sx < 0.0 else "ProcEye_R"
 		eye_mi.mesh = eye
 		eye_mi.material_override = eye_mat
 		eye_mi.position = Vector3(sx * 0.09, 0.07, -0.18)
 		head_pivot.add_child(eye_mi)
+
+	# Lower-jaw wedge on a hinge (v0.6.0: the guides finally open their mouths).
+	var jaw_pivot := Node3D.new()
+	jaw_pivot.name = "ProcJaw"
+	jaw_pivot.position = Vector3(0, -0.10, -0.12)
+	head_pivot.add_child(jaw_pivot)
+	var jaw_w := MeshInstance3D.new()
+	jaw_w.name = "JawWedge"
+	var jwm := BoxMesh.new()
+	jwm.size = Vector3(0.10, 0.05, 0.12)
+	jaw_w.mesh = jwm
+	jaw_w.material_override = dark_mat
+	jaw_w.position = Vector3(0, -0.03, -0.04)
+	jaw_pivot.add_child(jaw_w)
 
 	# Four stubby legs.
 	for lx in [-0.18, 0.18]:
@@ -717,6 +906,13 @@ func _build_guide(def: Dictionary, idx: int) -> Dictionary:
 	sl.position = Vector3(0, 1.5, 0)
 	root.add_child(sl)
 
+	# v0.6.0: face rig on the procedural guide (blink, gaze, jaw).
+	g["rig"] = MarigoldCharacterRig.attach_face(root, {
+		"eyes": ["ProcEye_L", "ProcEye_R"],
+		"head": head_pivot, "jaw": jaw_pivot,
+		"pupils": true, "glow": Color(1, 1, 1), "glow_energy": 2.5,
+		"seed": 200 + idx})
+
 	return g
 
 
@@ -779,6 +975,29 @@ func _build_hero_guide(def: Dictionary, idx: int, root: Node3D) -> Dictionary:
 	for slot in ["wing_l", "wing_r", "tail", "head", "ear_l", "ear_r"]:
 		var part: Node3D = g[slot]
 		g[slot + "_rest"] = part.rotation if part != null else Vector3.ZERO
+	# v0.6.0: code-parented lower-jaw wedge (the stopgap for the Blender
+	# jaw-split brief) + face rig on the hero model.
+	var head_part: Node3D = g["head"]
+	var jaw_pivot := Node3D.new()
+	jaw_pivot.name = "HeroJaw"
+	if head_part != null:
+		jaw_pivot.position = Vector3(0, -0.12, -0.10)
+		head_part.add_child(jaw_pivot)
+		var jw := MeshInstance3D.new()
+		jw.name = "JawWedge"
+		var jwm := BoxMesh.new()
+		jwm.size = Vector3(0.14, 0.06, 0.16)
+		jw.mesh = jwm
+		jw.material_override = MarigoldFX.pbr(Color(0.16, 0.10, 0.08), 0.0, 0.7)
+		jw.position = Vector3(0, -0.04, -0.03)
+		jaw_pivot.add_child(jw)
+	g["rig"] = MarigoldCharacterRig.attach_face(model, {
+		"eyes": def.get("eye_parts", []),
+		"pupil_eyes": def.get("pupil_eyes", []),
+		"head": head_part, "jaw": jaw_pivot,
+		"ears": def.get("ears", []),
+		"pupils": true, "glow": def["glow"], "glow_energy": 2.2,
+		"seed": 300 + idx})
 	# Name labels (same heights as the procedural guides).
 	var nl := MarigoldFX.make_label(String(def["name"]), 56, Color(1.0, 0.9, 0.6))
 	nl.position = Vector3(0, 1.75, 0)
@@ -1170,10 +1389,11 @@ func _animate_guides(delta: float) -> void:
 				tw = sin(_t * 25.0) * 0.30
 			(g["ear_l"] as Node3D).rotation.z = float((g.get("ear_l_rest", Vector3.ZERO) as Vector3).z) + 0.18 + tw
 			(g["ear_r"] as Node3D).rotation.z = float((g.get("ear_r_rest", Vector3.ZERO) as Vector3).z) - 0.18 - tw
-		# Curiosity: the head tracks the nearest hand within 2.5 m.
+		# Curiosity: the head tracks the nearest hand within 2.5 m (v0.6.0:
+		# the face rig's look-at owns this now; it captured head_rest).
+		var rig: MarigoldCharacterRig = g.get("rig")
 		var head: Node3D = g["head"]
-		if head != null:
-			var head_rest: Vector3 = g.get("head_rest", Vector3.ZERO)
+		if rig != null and head != null:
 			var gp: Vector3 = node.global_position
 			var best_d := 2.5
 			var target_hp := Vector3.ZERO
@@ -1182,17 +1402,18 @@ func _animate_guides(delta: float) -> void:
 				if d < best_d:
 					best_d = d
 					target_hp = hp
-			var target_yaw: float
 			if best_d < 2.5:
-				var inv: Transform3D = head.get_parent().global_transform.affine_inverse()
-				var local_t: Vector3 = inv * target_hp
-				target_yaw = clampf(atan2(-local_t.x, -local_t.z), -0.7, 0.7)
+				rig.look_at_point(target_hp)
 			else:
-				target_yaw = sin(_t * 0.6 + ph) * 0.30
-			head.rotation.y = lerpf(head.rotation.y, head_rest.y + target_yaw, minf(1.0, delta * 4.0))
-		# Eye glow pulse.
-		for m in g["mats"]:
-			MarigoldFX.pulse_glow(m, 1.6, 0.9, _t + ph, 2.5)
+				rig.release_look()
+		elif head != null:
+			var head_rest: Vector3 = g.get("head_rest", Vector3.ZERO)
+			head.rotation.y = lerpf(head.rotation.y,
+				head_rest.y + sin(_t * 0.6 + ph) * 0.30, minf(1.0, delta * 4.0))
+		# Eye glow pulse (the rig owns the glow on rigged guides now).
+		if g.get("rig") == null:
+			for m in g["mats"]:
+				MarigoldFX.pulse_glow(m, 1.6, 0.9, _t + ph, 2.5)
 
 
 # ---------------------------------------------------------------- feeding interaction
@@ -1226,6 +1447,9 @@ func _update_feeding() -> void:
 		if pinching and not _orbs.has(h):
 			var target: Variant = _nearest_unfed_guide(ppos)
 			if target != null:
+				# v0.6.0: first approach to a guide triggers its greeting.
+				if _greeted != target:
+					_greet_guide(target)
 				var orb := _make_orb()
 				orb.global_position = ppos
 				add_child(orb)
@@ -1307,6 +1531,11 @@ func _on_orb_arrived(g: Dictionary, orb: Node3D) -> void:
 	MarigoldHaptics.thump()
 	g["hop_t"] = 0.0
 	g["joy_t"] = 0.9 # spin + squash-and-stretch celebration
+	# v0.6.0: the snout opens wide on the feed-joy laugh (jaw hold + JOY).
+	var grig: MarigoldCharacterRig = g.get("rig")
+	if grig != null:
+		grig.set_expression("JOY", 0.3)
+		grig.set_jaw_hold(0.9, 1.0)
 	if MarigoldState.music != null:
 		MarigoldState.music.pluck(67, 0.7, 1.0)
 		MarigoldState.music.pluck(72, 0.7, 1.2)
@@ -1326,6 +1555,10 @@ func _fizzle_orb(orb: Node3D) -> void:
 func _celebrate() -> void:
 	_celebrating = true
 	_status_label.text = "Todos los guias estan contentos!"
+	# v0.6.0: the marigold memory object + festival moment.
+	if MarigoldOfrenda.collect("marigold"):
+		_status_label.text = "Memory kept: Marigold Bloom - for your ofrenda"
+	MarigoldPhotos.note_moment("all_fed")
 	for g in _guides:
 		var n: Node3D = g["node"]
 		MarigoldFX.spawn_confetti(self, n.global_position + Vector3(0, 1.2, 0), 40)

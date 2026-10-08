@@ -56,6 +56,9 @@ var _phase_t := 0.0
 var _done := false
 var _recheck_cd := 5.0
 var _stage_home := Vector3(0, 0, -0.2)
+# v0.6.0: espejo wink + head-tilt echo.
+var _wink_cd := 0.0
+var _head_roll := 0.0
 
 
 func setup(ar_mode: bool) -> void:
@@ -247,6 +250,7 @@ func _process(delta: float) -> void:
 				_finish()
 	for d in _dancers:
 		_update_dancer(d, beat, delta)
+	MarigoldCharacterRig.update_all(delta, _rig_ctx()) # v0.6.0: faces
 
 
 ## Read the body tracker (or hands fallback) into the smoothed mirror pose.
@@ -261,6 +265,10 @@ func _read_pose(delta: float) -> void:
 		var head: Vector3 = _body.get_joint_transform(J_HEAD).origin
 		var hl: Vector3 = _body.get_joint_transform(J_HAND_L).origin
 		var hr: Vector3 = _body.get_joint_transform(J_HAND_R).origin
+		# v0.6.0: echo the player's head tilt on the dancers ("that's me").
+		var head_roll_raw: float = clampf(
+			_body.get_joint_transform(J_HEAD).basis.get_euler().z, -0.4, 0.4)
+		_head_roll = lerpf(_head_roll, head_roll_raw, k)
 		if not _have_prev:
 			_prev_hips = hips
 			_have_prev = true
@@ -311,11 +319,30 @@ func _hand_pose_y(tr: XRPositionalTracker) -> float:
 
 func _update_energy(delta: float) -> void:
 	_confetti_cd -= delta
+	_wink_cd -= delta
 	if _energy > 0.9 and _confetti_cd <= 0.0:
 		_confetti_cd = 2.5
 		var c := Vector3(0, 1.8, -2.2)
 		MarigoldFX.spawn_confetti(_stage, c, 30)
 		MarigoldHaptics.pulse(0.6, 0.2)
+	# v0.6.0: the center dancer notices you - locks eyes, winks, tickles
+	# your nearest hand. "It noticed me."
+	if _energy > 0.9 and _wink_cd <= 0.0 and _dancers.size() >= 2:
+		_wink_cd = 12.0
+		var d: Dictionary = _dancers[1]
+		var rig: MarigoldCharacterRig = d.get("rig")
+		if rig != null:
+			rig.set_gaze_mode(MarigoldCharacterRig.LOOK_PLAYER)
+			var cam := get_viewport().get_camera_3d()
+			if cam != null:
+				rig.look_at_point(cam.global_position)
+			rig.wink(1.0)
+			rig.set_expression("MISCHIEVOUS", 0.4)
+		var m = _music()
+		if m != null and m.has_method("play_stinger"):
+			m.call("play_stinger", "wink", -8.0)
+		MarigoldHaptics.wink_tick()
+		MarigoldFX.eye_sparkle(_stage, (d["root"] as Node3D).global_position + Vector3(0, 1.6, 0))
 	_energy_label.text = "Energia " + "●".repeat(int(clampf(_energy * 5.0, 0.0, 5.0)))
 
 
@@ -325,6 +352,10 @@ func _update_dancer(d: Dictionary, beat: float, delta: float) -> void:
 		return
 	# Base: beat-synced troupe choreography (shared with Ofrenda Viva).
 	MarigoldCalavera.dance_update(d, beat, _t, delta)
+	# v0.6.0: the dancers echo your head tilt (J_HEAD roll -> head roll).
+	var rig: MarigoldCharacterRig = d.get("rig")
+	if rig != null:
+		rig.set_head_roll_extra(_head_roll)
 	if _phase == "finale":
 		return # the bow owns the body now
 	# Mirror layer: the player's pose on top of the beat.
@@ -360,3 +391,17 @@ func _finish() -> void:
 	MarigoldHaptics.fanfare()
 	await get_tree().create_timer(2.8).timeout
 	chapter_complete.emit()
+
+
+## ---------------- v0.6.0: face system ----------------
+
+func _rig_ctx() -> Dictionary:
+	var ctx := MarigoldCharacterRig.default_ctx(self)
+	ctx["hands"] = []
+	ctx["on_eye_contact"] = Callable(self, "_on_eye_contact")
+	return ctx
+
+
+func _on_eye_contact(rig: MarigoldCharacterRig) -> void:
+	MarigoldHaptics.gaze_lock()
+	MarigoldFX.eye_sparkle(_stage, rig.face_world_pos())

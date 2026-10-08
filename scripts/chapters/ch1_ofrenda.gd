@@ -62,6 +62,24 @@ var _viva_night_from := 18.4
 var _viva_names := ["Abuela Rosa", "Abuelo Tomas", "Tia Luz"]
 var _viva_name_labels: Array[Label3D] = []
 var _viva_photo_step := 0
+# v0.6.0: mirror avatar + diegetic camera.
+var _mirror_root: Node3D = null
+var _mirror_bust: Dictionary = {}
+var _mirror_glass_mat: StandardMaterial3D = null
+var _paint_swatches: Array = []
+var _paint_idx := 0
+var _cam_prop: Node3D = null
+var _cam_held := false
+var _bow_staged := false
+var _bow_winked := false
+var _bow_gasped := false
+
+const PAINTS := [
+	{"name": "Cempasuchil", "glow": Color(1.0, 0.60, 0.12)},
+	{"name": "Rosa Mexicana", "glow": Color(1.0, 0.30, 0.55)},
+	{"name": "Azul Espiritu", "glow": Color(0.30, 0.70, 1.0)},
+	{"name": "Blanco Hueso", "glow": Color(1.0, 0.95, 0.85)},
+]
 var _frame_glow: Array = [] # {"photo": ShaderMaterial, "edge": StandardMaterial3D, "pos": Vector3}
 var _viva_spawned := false
 # Wind + physics integration (v0.4.0).
@@ -133,6 +151,10 @@ func _process(delta: float) -> void:
 		var p: Vector3 = _pointer_pos()
 		p.y += 0.05 * sin(_t * 4.0)
 		_held.global_position = p
+	# v0.6.0: face system central driver (viva dancers, mirror bust).
+	_update_mirror(delta)
+	_update_camera(delta)
+	MarigoldCharacterRig.update_all(delta, _rig_ctx())
 	# Ofrenda Viva night sequence drives the scene; the player just watches.
 	if _viva:
 		_update_viva(delta)
@@ -140,7 +162,10 @@ func _process(delta: float) -> void:
 	# Pinch interaction: local edge detector (avoids the missing
 	# "trigger_click" action in the shared helper's fallback chain).
 	if _pinch_edge():
-		_on_pinch()
+		if _cam_held:
+			_snap_photo()
+		elif not _pointer_near_station():
+			_on_pinch()
 
 
 ## Pinch edge detection: mouse click = right-hand pinch, plus any
@@ -289,6 +314,8 @@ func _build() -> void:
 	_build_ofrenda()
 	_build_side_table()
 	_build_backdrop()
+	_build_mirror() # v0.6.0: skeleton self-avatar + spirit mirror
+	_build_camera_pedestal() # v0.6.0: diegetic folk-art camera
 
 	_progress_label = MarigoldFX.make_label("Ofrenda: 0/14", 72, Color(1.0, 0.82, 0.45))
 	_progress_label.position = Vector3(0, 2.45, 0.4)
@@ -505,11 +532,16 @@ func _make_pan_de_muerto() -> Node3D:
 		hero.scale = Vector3(0.85, 0.85, 0.85)
 		hero.position.y = -0.0755 * 0.85
 		pivot.add_child(hero)
+		# Baked-bread subsurface read: warm emissive wash on the hero loaf.
+		MarigoldModels.enable_vertex_colors(hero, Color(1.0, 0.72, 0.42), 0.30)
 		return pivot
 	# Fallback: procedural loaf.
 	var root := Node3D.new()
 	root.name = "PanDeMuerto"
 	var bread_mat := MarigoldFX.pbr(Color(0.80, 0.55, 0.28), 0.0, 0.85)
+	bread_mat.emission_enabled = true
+	bread_mat.emission = Color(1.0, 0.62, 0.30)
+	bread_mat.emission_energy_multiplier = 0.25
 	var bone_mat := MarigoldFX.pbr(Color(0.90, 0.70, 0.42), 0.0, 0.85)
 	var loaf := SphereMesh.new()
 	loaf.radius = 0.085
@@ -678,7 +710,13 @@ func _make_salt_dish() -> Node3D:
 	salt.height = 0.05
 	var smi := MeshInstance3D.new()
 	smi.mesh = salt
-	smi.material_override = MarigoldFX.pbr(Color(0.98, 0.98, 0.96), 0.0, 0.95)
+	# Glitter read: near-white, low roughness, faint warm emission so the
+	# candlelight sparkles on the grains (v0.6.0 material richness).
+	var salt_mat := MarigoldFX.pbr(Color(0.98, 0.98, 0.96), 0.25, 0.22)
+	salt_mat.emission_enabled = true
+	salt_mat.emission = Color(1.0, 0.92, 0.75)
+	salt_mat.emission_energy_multiplier = 0.35
+	smi.material_override = salt_mat
 	smi.scale = Vector3(1.0, 0.45, 1.0)
 	smi.position.y = 0.025
 	root.add_child(smi)
@@ -742,8 +780,8 @@ func _build_marigold_arch() -> void:
 	rng.seed = 777
 	var flower_kinds := ["flower_redA", "flower_redB", "flower_yellowA", "flower_yellowB"]
 	var leaf := MarigoldFX.pbr(Color(0.12, 0.35, 0.12), 0.0, 0.9)
-	for i in 26:
-		var t := float(i) / 25.0
+	for i in 40: # v0.6.0: arch density x1.5 (26 -> 40 blossoms)
+		var t := float(i) / 39.0
 		var pos := Vector3(cos(PI * t) * 1.35, 2.3 + sin(PI * t) * 1.05, 0)
 		# Real marigold flower model (Kenney CC0), glowing orange.
 		var blossom := MarigoldModels.instance(MarigoldModels.NATURE, flower_kinds[i % flower_kinds.size()])
@@ -1028,6 +1066,19 @@ void fragment() {
 	photo_mi.mesh = photo
 	photo_mi.position = Vector3(0, 0.23, 0.020)
 	root.add_child(photo_mi)
+	# Glass pane over the photo: alpha 0.15 + specular (v0.6.0 richness).
+	var glass := PlaneMesh.new()
+	glass.size = Vector2(0.30, 0.40)
+	var gmi := MeshInstance3D.new()
+	gmi.mesh = glass
+	var gmat := StandardMaterial3D.new()
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gmat.albedo_color = Color(0.9, 0.95, 1.0, 0.15)
+	gmat.metallic = 0.9
+	gmat.roughness = 0.08
+	gmi.material_override = gmat
+	gmi.position = Vector3(0, 0.23, 0.024)
+	root.add_child(gmi)
 	# Ofrenda Viva: remember the glow materials so photos can ignite one by one.
 	_frame_glow.append({"photo": sm, "edge": edge_mi.material_override,
 		"base": tints[variant % tints.size()], "lit": false})
@@ -1334,6 +1385,207 @@ func _celebrate() -> void:
 	# v0.5.0: instead of ending, the ofrenda comes alive - Ofrenda Viva.
 	_start_ofrenda_viva()
 
+## ---------------- v0.6.0: face system + mirror avatar + camera ----------------
+
+## Shared rig context for this chapter: camera head + pointer hand +
+## voice envelope + beat phase + eye-contact handler.
+func _rig_ctx() -> Dictionary:
+	var ctx := MarigoldCharacterRig.default_ctx(self)
+	ctx["hands"] = [_pointer_pos()]
+	ctx["on_eye_contact"] = Callable(self, "_on_eye_contact")
+	return ctx
+
+
+## Eye-contact beat (rate-limited 1/10 s per character by the rig).
+func _on_eye_contact(rig: MarigoldCharacterRig) -> void:
+	MarigoldHaptics.gaze_lock()
+	var m = _viva_music()
+	if m != null and m.has_method("play_stinger"):
+		m.call("play_stinger", "greet", -12.0)
+	MarigoldFX.eye_sparkle(self, rig.face_world_pos())
+
+
+## Skeleton self-avatar + spirit mirror (finding 1). CHEAP: no planar
+## reflection - a shimmer-glass plane plus a calavera bust that turns to
+## face you (the rig's look-at), wearing your chosen face paint.
+func _build_mirror() -> void:
+	_mirror_root = Node3D.new()
+	_mirror_root.name = "MirrorStation"
+	_mirror_root.position = Vector3(-1.9, 0, 1.4)
+	_mirror_root.rotation.y = 0.6
+	_stage.add_child(_mirror_root)
+	# Ornate frame: two posts + top bar + gold trim ring.
+	var trim_mat := MarigoldFX.pbr(Color(0.72, 0.50, 0.18), 0.7, 0.35)
+	for sx in [-0.55, 0.55]:
+		var post := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(0.09, 1.9, 0.09)
+		post.mesh = pm
+		post.material_override = trim_mat
+		post.position = Vector3(sx, 0.95, 0)
+		_mirror_root.add_child(post)
+	var bar := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.19, 0.09, 0.09)
+	bar.mesh = bm
+	bar.material_override = trim_mat
+	bar.position = Vector3(0, 1.94, 0)
+	_mirror_root.add_child(bar)
+	# Spirit glass: translucent shimmer (animated alpha pulse, unshaded).
+	var glass := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(1.0, 1.75)
+	glass.mesh = q
+	var gm := StandardMaterial3D.new()
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.albedo_color = Color(0.65, 0.85, 1.0, 0.16)
+	gm.emission_enabled = true
+	gm.emission = Color(0.5, 0.75, 1.0)
+	gm.emission_energy_multiplier = 0.5
+	glass.material_override = gm
+	glass.position = Vector3(0, 1.0, 0)
+	_mirror_root.add_child(glass)
+	_mirror_glass_mat = gm
+	# The reflection: a calavera bust behind the glass, always facing you.
+	var d := MarigoldCalavera.make_dancer(Color(1.0, 0.60, 0.12), 0.55, {"seed": 7})
+	var bust: Node3D = d["root"]
+	bust.position = Vector3(0, 0, -0.55)
+	_mirror_root.add_child(bust)
+	_mirror_bust = d
+	_paint_idx = MarigoldSettings.get_paint()
+	_apply_paint(_paint_idx, false)
+	var lab := MarigoldFX.make_label("Mira - this is you tonight", 44, Color(1.0, 0.90, 0.70))
+	lab.position = Vector3(0, 2.25, 0.1)
+	_mirror_root.add_child(lab)
+	var slab := MarigoldFX.make_label("Pinch a color for your face paint", 34, Color(0.85, 0.80, 0.90))
+	slab.position = Vector3(0, 0.28, 0.12)
+	_mirror_root.add_child(slab)
+	# 4 face-paint swatches.
+	for i in PAINTS.size():
+		var sw := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.055
+		sm.height = 0.10
+		sw.mesh = sm
+		sw.material_override = MarigoldFX.glow((PAINTS[i] as Dictionary)["glow"], 1.8)
+		sw.position = Vector3(-0.45 + float(i) * 0.30, 0.48, 0.14)
+		sw.set_meta("paint_idx", i)
+		_mirror_root.add_child(sw)
+		_paint_swatches.append(sw)
+
+
+func _apply_paint(idx: int, announce: bool) -> void:
+	_paint_idx = clampi(idx, 0, PAINTS.size() - 1)
+	MarigoldSettings.set_paint(_paint_idx)
+	var rig: MarigoldCharacterRig = _mirror_bust.get("rig")
+	if rig != null:
+		rig.set_glow_color((PAINTS[_paint_idx] as Dictionary)["glow"])
+	if announce:
+		_toast("Face paint: " + String((PAINTS[_paint_idx] as Dictionary)["name"]), 2.5)
+		MarigoldHaptics.confirm()
+		if MarigoldPhotos.note_moment("mirror_self"):
+			_toast("Face paint: " + String((PAINTS[_paint_idx] as Dictionary)["name"]) + " " + MarigoldPhotos.progress_text(), 3.0)
+
+
+func _update_mirror(delta: float) -> void:
+	if _mirror_root == null:
+		return
+	# Glass shimmer.
+	if _mirror_glass_mat != null:
+		_mirror_glass_mat.emission_energy_multiplier = 0.45 + 0.20 * sin(_t * 2.2)
+	# The reflection faces you (head-lead via the rig's look-at).
+	var bust: Node3D = _mirror_bust.get("root")
+	if bust != null and is_instance_valid(bust):
+		MarigoldCalavera.face_player(bust, _viva_cam_pos())
+	# Paint swatch pinch.
+	for sw in _paint_swatches:
+		if sw == null or not is_instance_valid(sw):
+			continue
+		var touched := false
+		for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+			if MarigoldHands.pinch_active(self, hand) \
+					and (sw as Node3D).global_position.distance_to(_pointer_pos()) < 0.22:
+				touched = true
+				break
+		if touched and int((sw as Node3D).get_meta("paint_idx")) != _paint_idx:
+			_apply_paint(int((sw as Node3D).get_meta("paint_idx")), true)
+
+
+## Diegetic camera (finding 2): a folk-art camera on a pedestal. Pinch to
+## take it; while held, pinch snaps a 320x180 thumbnail into user://photos/.
+func _build_camera_pedestal() -> void:
+	var ped := Node3D.new()
+	ped.name = "CameraPedestal"
+	ped.position = Vector3(1.9, 0, 1.4)
+	_stage.add_child(ped)
+	var table := MeshInstance3D.new()
+	var tm := BoxMesh.new()
+	tm.size = Vector3(0.5, 0.06, 0.4)
+	table.mesh = tm
+	table.material_override = MarigoldFX.pbr(Color(0.42, 0.24, 0.12), 0.0, 0.7)
+	table.position = Vector3(0, 0.85, 0)
+	ped.add_child(table)
+	var leg := MeshInstance3D.new()
+	var lm := BoxMesh.new()
+	lm.size = Vector3(0.08, 0.85, 0.08)
+	leg.mesh = lm
+	leg.material_override = MarigoldFX.pbr(Color(0.35, 0.20, 0.10), 0.0, 0.7)
+	leg.position = Vector3(0, 0.42, 0)
+	ped.add_child(leg)
+	_cam_prop = MarigoldPhotos.make_camera_prop()
+	_cam_prop.position = Vector3(0, 1.02, 0)
+	ped.add_child(_cam_prop)
+	var lab := MarigoldFX.make_label("Take the camera - capture 12 festival moments", 36, Color(1.0, 0.90, 0.70))
+	lab.position = Vector3(0, 1.45, 0)
+	ped.add_child(lab)
+
+
+func _update_camera(_delta: float) -> void:
+	if _cam_prop == null or not is_instance_valid(_cam_prop):
+		return
+	if _cam_held:
+		# Held: follows the pointer with a slight offset.
+		var p := _pointer_pos()
+		_cam_prop.global_position = p + Vector3(0, -0.03, 0)
+		return
+	# Pickup: pinch near the prop.
+	for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+		if MarigoldHands.pinch_active(self, hand) \
+				and _cam_prop.global_position.distance_to(_pointer_pos()) < 0.30:
+			_cam_held = true
+			MarigoldHaptics.thump()
+			_toast("Camera in hand - pinch to snap a photo", 3.0)
+			break
+
+
+func _snap_photo() -> void:
+	var path := MarigoldPhotos.snap(self, "")
+	if path != "":
+		_toast("Photo saved", 2.0)
+	else:
+		_toast("Shutter!", 1.2)
+	MarigoldHaptics.click()
+	MarigoldFX.spawn_sparks(self, _cam_prop.global_position, Color(1, 1, 1), 8)
+	var m = _viva_music()
+	if m != null and m.has_method("chime"):
+		m.call("chime", 96, 0.4)
+
+
+## True when the pointer is near the mirror swatches or camera (so ofrenda
+## building doesn't also fire on those pinches).
+func _pointer_near_station() -> bool:
+	var p := _pointer_pos()
+	for sw in _paint_swatches:
+		if sw != null and is_instance_valid(sw) \
+				and (sw as Node3D).global_position.distance_to(p) < 0.30:
+			return true
+	if _cam_prop != null and is_instance_valid(_cam_prop) and not _cam_held \
+			and _cam_prop.global_position.distance_to(p) < 0.35:
+		return true
+	return false
+
+
 ## ---------------- Ofrenda Viva (v0.5.0) ----------------
 ## The night-time living-ofrenda sequence: after the offering is complete,
 ## night falls, the three photos ignite one by one with chimes and names,
@@ -1366,6 +1618,7 @@ func _start_ofrenda_viva() -> void:
 		_viva_night_from = MarigoldSky.instance.get_time_of_day()
 	_toast("La noche cae... la ofrenda despierta", 5.0)
 	MarigoldHaptics.sub_bass(1.2)
+	MarigoldPhotos.note_moment("viva_night")
 
 
 func _update_viva(delta: float) -> void:
@@ -1414,6 +1667,9 @@ func _update_viva(delta: float) -> void:
 		_viva_phase = "bow"
 		_viva_bower = _viva_dancers[0]
 		_viva_bow_t = 0.0
+		_bow_staged = false
+		_bow_winked = false
+		_bow_gasped = false
 		_toast("Mira - te saluda", 4.0)
 		if m != null and m.has_method("chime"):
 			m.call("chime", 84, 0.7)
@@ -1498,6 +1754,11 @@ func _ignite_photo(idx: int) -> void:
 	tw.tween_property(lab, "modulate:a", 1.0, 1.6)
 	# A warm burst at the frame.
 	MarigoldFX.spawn_sparks(self, pos + Vector3(0, -0.3, 0), Color(1.0, 0.75, 0.3), 14)
+	# v0.6.0: first ignition earns the photo memory object + moment.
+	if idx == 0:
+		if MarigoldOfrenda.collect("foto"):
+			_toast("Memory kept: Abuela's Photo - for your ofrenda", 4.0)
+		MarigoldPhotos.note_moment("ofrenda_reveal")
 
 
 func _pulse_photo_glow() -> void:
@@ -1541,6 +1802,9 @@ func _spawn_viva_dancers() -> void:
 		d["dancer_scale"] = 0.92 + float(i % 3) * 0.06
 		d["rise_t"] = -float(i) * 0.5 # staggered emergence
 		_viva_dancers.append(d)
+		var wrig: MarigoldCharacterRig = d.get("rig")
+		if wrig != null:
+			wrig.set_expression("WONDER", 2.5) # night wonder on their faces
 		MarigoldFX.spawn_sparks(self, Vector3(pos.x, 0.4, pos.z), Color(1.0, 0.7, 0.2), 16)
 	_toast("Los calaveras bailan para ti", 4.0)
 
@@ -1557,8 +1821,39 @@ func _update_bow(delta: float) -> void:
 	if root.position.y < base_y:
 		root.position.y = minf(base_y, root.position.y + delta * 2.0)
 	MarigoldCalavera.face_player(root, _viva_cam_pos())
-	# Bow in over 1.5 s, hold, then release slightly as the exits begin.
-	var bow_k := clampf(_viva_bow_t / 1.5, 0.0, 1.0)
+	var rig: MarigoldCharacterRig = _viva_bower.get("rig")
+	var cam := _viva_cam_pos()
+	# "The Bow, finished" (v0.6.0): pupils snap -> 1.5 s of eye contact ->
+	# wink -> bow with jaw-open smile -> crowd-gasp stinger + petal burst.
+	if _viva_bow_t < 1.5:
+		if rig != null and not _bow_staged:
+			_bow_staged = true
+			rig.set_gaze_mode(MarigoldCharacterRig.LOOK_PLAYER)
+			rig.snap_look(cam)
+			rig.set_expression("WONDER", 0.5)
+	elif not _bow_winked:
+		_bow_winked = true
+		if rig != null:
+			rig.wink(1.0)
+			rig.set_expression("JOY", 0.4)
+			rig.set_singing(true) # jaw opens on the beat accents
+		var m = _viva_music()
+		if m != null and m.has_method("play_stinger"):
+			m.call("play_stinger", "wink", -8.0)
+		MarigoldHaptics.wink_tick()
+	# Bow in over 1.5 s (starting after the eye-contact beat), hold, then
+	# release slightly as the exits begin.
+	var bow_k := clampf((_viva_bow_t - 1.5) / 1.5, 0.0, 1.0)
 	if _viva_t > 32.0:
 		bow_k = 1.0 - clampf((_viva_t - 32.0) / 1.5, 0.0, 1.0) * 0.4
 	MarigoldCalavera.set_bow(_viva_bower, bow_k)
+	if bow_k >= 1.0 and not _bow_gasped:
+		_bow_gasped = true
+		var m2 = _viva_music()
+		if m2 != null and m2.has_method("play_stinger"):
+			m2.call("play_stinger", "gasp", -6.0)
+		MarigoldHaptics.gasp_rumble()
+		MarigoldFX.scatter_petals(self, root.global_position + Vector3(0, 1.4, 0), 24)
+		var moment := MarigoldPhotos.capture_moment(self, "the_bow")
+		if moment != "":
+			_toast("📸 " + moment + " " + MarigoldPhotos.progress_text(), 4.0)

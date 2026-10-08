@@ -71,6 +71,9 @@ var _alebrije_home := Vector3(0, 0.55, -1.9)
 var _pet_acc := 0.0
 var _purr_cd := 0.0
 var _stage_home := Vector3(0, 0, -0.2)
+# v0.6.0: the deer's face finally reacts to your touch.
+var _deer_rig: MarigoldCharacterRig = null
+var _startle_cd := 0.0
 
 
 func setup(ar_mode: bool) -> void:
@@ -130,6 +133,7 @@ func _process(delta: float) -> void:
 		St.PET:
 			_update_pet(delta)
 	_update_phase_flow(delta)
+	MarigoldCharacterRig.update_all(delta, MarigoldCharacterRig.default_ctx(self))
 
 
 ## ---------------- phase flow ----------------
@@ -337,7 +341,45 @@ func _build_stations() -> void:
 		_alebrije.add_child(fb)
 	_alebrije.position = _alebrije_home
 	_stage.add_child(_alebrije)
+	_attach_deer_face() # v0.6.0: the deer watches you, blinks, reacts
 	_hide_all_stations()
+
+
+## v0.6.0: face rig on the pet deer (GLB eye parts, or a procedural face
+## kit on the fallback orb). Confirm via MarigoldModels.find_part().
+func _attach_deer_face() -> void:
+	if _alebrije == null:
+		return
+	var head := MarigoldModels.find_part(_alebrije, "DeerHead")
+	if head != null:
+		# Real GLB: the many-eyed deer, staggered blinks on all six eyes,
+		# pupils on the big pair (draw-call budget).
+		var jaw_pivot := Node3D.new()
+		jaw_pivot.name = "PetJaw"
+		jaw_pivot.position = Vector3(0, -0.12, -0.10)
+		head.add_child(jaw_pivot)
+		var jw := MeshInstance3D.new()
+		var jwm := BoxMesh.new()
+		jwm.size = Vector3(0.14, 0.06, 0.16)
+		jw.mesh = jwm
+		jw.material_override = MarigoldFX.pbr(Color(0.16, 0.10, 0.08), 0.0, 0.7)
+		jw.position = Vector3(0, -0.04, -0.03)
+		jaw_pivot.add_child(jw)
+		_deer_rig = MarigoldCharacterRig.attach_face(_alebrije, {
+			"eyes": ["DeerBig_eye_L", "DeerBig_eye_R",
+				"DeerMid_eye_L", "DeerMid_eye_R",
+				"DeerSml_eye_L", "DeerSml_eye_R"],
+			"pupil_eyes": ["DeerBig_eye_L", "DeerBig_eye_R"],
+			"head": head, "jaw": jaw_pivot,
+			"ears": ["DeerEar_L", "DeerEar_R"],
+			"pupils": true, "glow": Color(0.70, 0.45, 1.0),
+			"glow_energy": 2.2, "seed": 42})
+	else:
+		# Fallback orb: procedural face kit at measured positions.
+		_deer_rig = MarigoldCharacterRig.build_face(_alebrije, {
+			"eye_positions": [Vector3(-0.08, 0.08, 0.17), Vector3(0.08, 0.08, 0.17)],
+			"eye_radius": 0.035, "glow": Color(0.3, 0.9, 0.7),
+			"face_pos": Vector3(0, 0.05, 0.10), "seed": 42})
 
 
 func _station_nodes(st: int) -> Array:
@@ -606,22 +648,46 @@ func _update_pet(delta: float) -> void:
 		var spd: float = maxf(
 			MarigoldHands.grab_speed(self, MarigoldHands.HAND_RIGHT),
 			MarigoldHands.grab_speed(self, MarigoldHands.HAND_LEFT))
+		_startle_cd -= delta
+		# v0.6.0: the deer watches your stroking hand.
+		if _deer_rig != null:
+			_deer_rig.look_at_point(_pointer(MarigoldHands.HAND_RIGHT))
 		if spd < 0.9:
 			_pet_acc += delta
 			# Happy wiggle.
 			_alebrije.rotation.z = sin(_t * 10.0) * 0.06
 			_alebrije.position.y = _alebrije_home.y + absf(sin(_t * 5.0)) * 0.04
+			# Slow petting: eyes ease shut (bliss), ears perk.
+			if _deer_rig != null:
+				_deer_rig.set_relax(minf(1.0, _pet_acc / 2.0) * 0.85)
+				_deer_rig.set_ear_flat(0.0)
+				_deer_rig.set_expression("JOY", 0.6)
 			_purr_cd -= delta
 			if _purr_cd <= 0.0:
 				_purr_cd = 1.6
 				var m = _music()
 				if m != null and m.has_method("pluck"):
 					m.call("pluck", 45, 0.45, 1.6, 0.998)
-				MarigoldHaptics.pulse(0.35, 0.3)
+				MarigoldHaptics.purr(0.8)
 				MarigoldFX.spawn_sparks(_stage, center, C_PINK, 6)
 			_prog_label.text = "Purring... %d%%" % int(clampf(_pet_acc / 5.0, 0.0, 1.0) * 100.0)
 			if _pet_acc >= 5.0:
 				MarigoldFX.spawn_confetti(_stage, center, 30)
+				MarigoldPhotos.note_moment("pet_bliss")
 				_succeed("New spirit friend!")
+		else:
+			# Fast hands startle it: SURPRISED + ears flatten (teaches gentle hands).
+			if _deer_rig != null:
+				_deer_rig.set_expression("SURPRISED", 0.3)
+				_deer_rig.set_ear_flat(1.0)
+				_deer_rig.set_relax(0.0)
+			if _startle_cd <= 0.0:
+				_startle_cd = 2.0
+				MarigoldHaptics.deny()
+				_prog_label.text = "Gentle... slow hands"
 	else:
+		if _deer_rig != null:
+			_deer_rig.release_look()
+			_deer_rig.set_relax(0.0)
+			_deer_rig.set_ear_flat(0.0)
 		_alebrije.rotation.z = lerpf(_alebrije.rotation.z, 0.0, clampf(4.0 * delta, 0.0, 1.0))

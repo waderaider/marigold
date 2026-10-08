@@ -65,8 +65,10 @@ static func _build_lut_image(warm: bool) -> Image:
 static func _get_luts() -> Array:
 	if _identity_lut == null and ClassDB.class_exists("OpenXRMetaPassthroughColorLut"):
 		var rgb = OpenXRMetaPassthroughColorLut.COLOR_LUT_CHANNELS_RGB
-		_identity_lut = OpenXRMetaPassthroughColorLut.new(_build_lut_image(false), rgb)
-		_warm_lut = OpenXRMetaPassthroughColorLut.new(_build_lut_image(true), rgb)
+		# Verified against the real plugin binary (5.1.0): the constructor
+		# takes no arguments; LUTs are built via create_from_image().
+		_identity_lut = OpenXRMetaPassthroughColorLut.create_from_image(_build_lut_image(false), rgb)
+		_warm_lut = OpenXRMetaPassthroughColorLut.create_from_image(_build_lut_image(true), rgb)
 	return [_identity_lut, _warm_lut]
 
 
