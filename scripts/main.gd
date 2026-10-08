@@ -3,16 +3,28 @@
 extends Node3D
 
 const CHAPTERS := [
-	{"name": "The Ofrenda", "scene": "res://scenes/chapters/ch1_ofrenda.tscn", "mood": "tender"},
-	{"name": "The Marigold Bridge", "scene": "res://scenes/chapters/ch2_bridge.tscn", "mood": "wondrous"},
-	{"name": "Plaza de los Alebrijes", "scene": "res://scenes/chapters/ch3_alebrijes.tscn", "mood": "wondrous"},
-	{"name": "Papel Picado Canopy", "scene": "res://scenes/chapters/ch4_papel.tscn", "mood": "festive"},
-	{"name": "El Gran Baile", "scene": "res://scenes/chapters/ch5_baile.tscn", "mood": "finale"},
+	{"key": "ch1", "name": "The Ofrenda", "scene": "res://scenes/chapters/ch1_ofrenda.tscn", "mood": "tender",
+		"desc": "Build the offering of petals, photos and candles", "keyart": "res://assets/keyart/ch1_ofrenda.png"},
+	{"key": "ch2", "name": "The Marigold Bridge", "scene": "res://scenes/chapters/ch2_bridge.tscn", "mood": "wondrous",
+		"desc": "Cross the glowing bridge over luminous water", "keyart": "res://assets/keyart/ch2_bridge.png"},
+	{"key": "ch3", "name": "Plaza de los Alebrijes", "scene": "res://scenes/chapters/ch3_alebrijes.tscn", "mood": "wondrous",
+		"desc": "Meet the glowing spirit-animal guides", "keyart": "res://assets/keyart/ch3_alebrijes.png"},
+	{"key": "ch4", "name": "Papel Picado Canopy", "scene": "res://scenes/chapters/ch4_papel.tscn", "mood": "festive",
+		"desc": "Wave your hands through cut-paper banners", "keyart": "res://assets/keyart/ch4_papel.png"},
+	{"key": "ch5", "name": "El Gran Baile", "scene": "res://scenes/chapters/ch5_baile.tscn", "mood": "finale",
+		"desc": "Follow the leader in the grand dance finale", "keyart": "res://assets/keyart/ch5_baile.png"},
 ]
 
 const EXPERIENCES := {
-	"guitarra": {"name": "Guitarra Mexicana", "scene": "res://scenes/chapters/guitarra.tscn", "mood": "festive"},
+	"guitarra": {"name": "Guitarra Mexicana", "scene": "res://scenes/chapters/guitarra.tscn", "mood": "festive",
+		"desc": "Rhythm-strum folk guitar - two original songs", "keyart": "res://assets/keyart/guitarra.png"},
+	"mano_magica": {"name": "Mano Magica", "scene": "res://scenes/chapters/mano_magica.tscn", "mood": "wondrous",
+		"desc": "A guided hand-tracking tour: pinch, grab, throw, sculpt", "keyart": "res://assets/keyart/mano_magica.png"},
+	"espejo": {"name": "Gran Baile: Espejo", "scene": "res://scenes/chapters/espejo.tscn", "mood": "finale",
+		"desc": "Mirror dance - your real moves, body tracked", "keyart": "res://assets/keyart/espejo.png"},
 }
+
+const PROGRESS_FILE := "user://marigold_progress.cfg"
 
 var _sky: MarigoldSky
 var _title_root: Node3D
@@ -24,6 +36,8 @@ var _menu: MarigoldMenu
 var _pending_apk := ""
 var _xr: OpenXRInterface = null
 var _t := 0.0
+var _current_kind := "" # "chapter" | "exp" - for pause restart
+var _current_exp_key := ""
 
 
 func _ready() -> void:
@@ -112,7 +126,19 @@ func _build_menu() -> void:
 	_menu.name = "MenuRoot"
 	add_child(_menu)
 	_menu.set_chapters(CHAPTERS)
-	_menu.set_experiences([{"key": "guitarra", "name": "Guitarra Mexicana"}])
+	_menu.set_experiences([
+		{"key": "guitarra", "name": "Guitarra Mexicana",
+			"desc": "Rhythm-strum folk guitar - two original songs",
+			"keyart": "res://assets/keyart/guitarra.png"},
+		{"key": "mano_magica", "name": "Mano Magica",
+			"desc": "A guided hand-tracking tour: pinch, grab, throw, sculpt",
+			"keyart": "res://assets/keyart/mano_magica.png"},
+		{"key": "espejo", "name": "Gran Baile: Espejo",
+			"desc": "Mirror dance - your real moves, body tracked",
+			"keyart": "res://assets/keyart/espejo.png"},
+	])
+	var prog := _load_progress()
+	_menu.set_progress(int(prog.get("current", 0)), prog.get("completed", []))
 	var ver: String = ProjectSettings.get_setting("application/config/version", "0.3.0")
 	_menu.set_version("v" + ver)
 	_menu.set_mode(MarigoldState.ar_mode)
@@ -156,18 +182,44 @@ func _load_experience(key: String) -> void:
 	if _current_chapter.has_signal("chapter_complete"):
 		_current_chapter.chapter_complete.connect(_on_experience_complete)
 	MarigoldState.music.play_mood(info["mood"])
+	_current_kind = "exp"
+	_current_exp_key = key
+	_wire_pause_and_skins(key, String(info["name"]))
 
 
 func _on_experience_complete() -> void:
 	# Experiences return to the menu instead of advancing the journey.
 	await get_tree().create_timer(0.8).timeout
+	_quit_to_menu()
+
+
+## ---- Pause / restart / quit (shared pause overlay, v0.5.0) ----
+
+## Wire the pause overlay + controller skins + start legend for a chapter.
+func _wire_pause_and_skins(key: String, display_name: String) -> void:
+	MarigoldPause.attach(Callable(self, "_restart_current"), Callable(self, "_quit_to_menu"), key)
+	MarigoldControllerSkins.apply($XROrigin3D, key)
+	MarigoldControllerSkins.show_legend(_chapter_root, key, display_name)
+
+
+func _restart_current() -> void:
+	if _current_kind == "exp" and _current_exp_key != "":
+		_load_experience(_current_exp_key)
+	elif _current_kind == "chapter":
+		_load_chapter(_chapter_index)
+
+
+func _quit_to_menu() -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
+	_current_kind = ""
+	_current_exp_key = ""
 	MarigoldState.music.stop()
 	MarigoldState.reset()
 	if _sky:
 		_sky.set_gentle_mode(false) # experiences may have requested gentle weather
+	MarigoldPause.detach()
 	_menu.show_menu()
 
 
@@ -221,6 +273,18 @@ func _on_download_failed(error: String) -> void:
 
 ## ---- Chapter flow ----
 
+## Petal-fall transition: a curtain of petals falls in front of the player
+## (no hard cuts between chapters, v0.5.0).
+func _petal_transition() -> void:
+	var cam := get_viewport().get_camera_3d()
+	var center := Vector3(0, 0, -2.0)
+	if cam != null:
+		center = cam.global_position + (-cam.global_transform.basis.z) * 1.6
+		center.y = 0.0
+	MarigoldFX.petal_ceiling_fall(self, center, 2.2, 90, 2.2, 2.6)
+	await get_tree().create_timer(1.1).timeout
+
+
 func _load_chapter(idx: int) -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
@@ -230,6 +294,7 @@ func _load_chapter(idx: int) -> void:
 		return
 	_chapter_index = idx
 	MarigoldState.chapter_index = idx
+	_save_progress(idx)
 	var info: Dictionary = CHAPTERS[idx]
 	var scene: PackedScene = load(info["scene"])
 	_current_chapter = scene.instantiate()
@@ -239,18 +304,66 @@ func _load_chapter(idx: int) -> void:
 	if _current_chapter.has_signal("chapter_complete"):
 		_current_chapter.chapter_complete.connect(_on_chapter_complete)
 	MarigoldState.music.play_mood(info["mood"])
+	_current_kind = "chapter"
+	_wire_pause_and_skins(String(info["key"]), String(info["name"]))
 	MarigoldFX.scatter_petals(_chapter_root, Vector3(0, 1.5, -2), 40)
 
 
 func _on_chapter_complete() -> void:
-	# Brief beat, then next chapter.
-	await get_tree().create_timer(1.2).timeout
+	# Mark the finished chapter, then a petal-fall beat before the next.
+	_mark_completed(_chapter_index)
+	await _petal_transition()
 	_load_chapter(_chapter_index + 1)
+
+
+## ---- Journey progress (Continue Journey, v0.5.0) ----
+
+func _load_progress() -> Dictionary:
+	var cfg := ConfigFile.new()
+	var res := {"current": 0, "completed": []}
+	if cfg.load(PROGRESS_FILE) != OK:
+		return res
+	res["current"] = int(cfg.get_value("journey", "current", 0))
+	var done: Array = []
+	for x in cfg.get_value("journey", "completed", []):
+		done.append(int(x))
+	res["completed"] = done
+	return res
+
+
+func _save_progress(idx: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(PROGRESS_FILE) # keep completed list
+	cfg.set_value("journey", "current", idx)
+	cfg.save(PROGRESS_FILE)
+	_refresh_menu_progress()
+
+
+func _mark_completed(idx: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(PROGRESS_FILE)
+	var done: Array = []
+	for x in cfg.get_value("journey", "completed", []):
+		done.append(int(x))
+	if not done.has(idx):
+		done.append(idx)
+	cfg.set_value("journey", "completed", done)
+	cfg.set_value("journey", "current", mini(idx + 1, CHAPTERS.size() - 1))
+	cfg.save(PROGRESS_FILE)
+	_refresh_menu_progress()
+
+
+func _refresh_menu_progress() -> void:
+	if _menu == null:
+		return
+	var prog := _load_progress()
+	_menu.set_progress(int(prog.get("current", 0)), prog.get("completed", []))
 
 
 func _show_finale_card() -> void:
 	MarigoldState.music.stop()
 	if _sky:
 		_sky.set_gentle_mode(false)
+	MarigoldPause.detach()
 	_menu.show_finale()
 	MarigoldFX.scatter_petals(_title_root, Vector3(0, 1.5, 0), 80)

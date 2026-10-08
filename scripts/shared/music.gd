@@ -7,6 +7,15 @@ class_name MarigoldMusic
 
 const AUDIO_DIR := "res://assets/audio/"
 
+## Beats per minute of each generated mood loop (from tools/make_music.py).
+## Drives get_beat_phase() for beat-synced choreography (v0.5.0).
+const BEAT_BPM := {
+	"tender": 60.0,
+	"wondrous": 70.0,
+	"festive": 125.0, # 6/8: eighth = 0.24 s, beat = 2 eighths
+	"finale": 120.0,
+}
+
 var _players: Dictionary = {}
 var _current_mood := ""
 var _volume_db := -6.0
@@ -93,6 +102,16 @@ func set_ambience_volume(db: float) -> void:
 		(_amb_players[key] as AudioStreamPlayer).volume_db = db
 
 
+## Duck music + ambience under the pause overlay (v0.5.0). Cheap: just
+## drops the loop volumes; everything keeps playing underneath.
+func set_ducked(on: bool) -> void:
+	var cut := -14.0 if on else 0.0
+	for key in _players:
+		(_players[key] as AudioStreamPlayer).volume_db = _volume_db + cut
+	for key in _amb_players:
+		(_amb_players[key] as AudioStreamPlayer).volume_db = _amb_volume_db + cut
+
+
 ## One-shot thunder clap, volume scaled by intensity 0..1. Auto-freed.
 func play_thunder(intensity: float = 1.0) -> void:
 	if _thunder_stream == null:
@@ -108,9 +127,46 @@ func play_thunder(intensity: float = 1.0) -> void:
 	p.finished.connect(p.queue_free)
 
 
+## ---- Beat tracking (v0.5.0) ----
+## The mood loops are fixed-tempo generated WAVs, so the beat phase can be
+## derived from the playback position. 0.0 = beat start, 1.0 = next beat.
+## Returns -1.0 when no mood is playing (caller should idle-dance instead).
+
+func get_beat_phase() -> float:
+	var p: AudioStreamPlayer = _players.get(_current_mood)
+	if p == null or not p.playing:
+		return -1.0
+	var bpm: float = BEAT_BPM.get(_current_mood, 60.0)
+	var pos := p.get_playback_position()
+	return fmod(pos * bpm / 60.0, 1.0)
+
+
+## Seconds since the current beat started (-1.0 when no mood playing).
+func get_beat_time() -> float:
+	var phase := get_beat_phase()
+	if phase < 0.0:
+		return -1.0
+	var bpm: float = BEAT_BPM.get(_current_mood, 60.0)
+	return phase * 60.0 / bpm
+
+
+## Current mood's BPM (0.0 when nothing playing).
+func get_bpm() -> float:
+	var p: AudioStreamPlayer = _players.get(_current_mood)
+	if p == null or not p.playing:
+		return 0.0
+	return BEAT_BPM.get(_current_mood, 60.0)
+
+
+## Soft bell chime for photo glows / blessings: long KS decay, gentle attack.
+func chime(midi_note: int, volume: float = 0.6) -> AudioStreamPlayer:
+	return pluck(midi_note, volume, 2.8, 0.9992)
+
+
 ## Runtime Karplus-Strong plucked string for the guitar station.
 ## midi_note: standard MIDI number (e.g. 40=E2 .. 64=E4). Returns and plays.
-func pluck(midi_note: int, volume: float = 0.8, duration: float = 1.2) -> AudioStreamPlayer:
+## damp: feedback damping (0.996 = guitar pluck, 0.9992 = bell-like chime).
+func pluck(midi_note: int, volume: float = 0.8, duration: float = 1.2, damp: float = 0.996) -> AudioStreamPlayer:
 	var freq := 440.0 * pow(2.0, (midi_note - 69) / 12.0)
 	var rate := 22050
 	var n := int(rate * duration)
@@ -128,7 +184,7 @@ func pluck(midi_note: int, volume: float = 0.8, duration: float = 1.2) -> AudioS
 		var s: float = line[idx]
 		# Simple lowpass via averaging with next sample (the KS magic).
 		var nxt: float = line[(idx + 1) % period]
-		line[idx] = 0.996 * 0.5 * (s + nxt)
+		line[idx] = damp * 0.5 * (s + nxt)
 		var v := int(clampf(s, -1.0, 1.0) * 32767.0)
 		buf[i * 2] = v & 0xFF
 		buf[i * 2 + 1] = (v >> 8) & 0xFF

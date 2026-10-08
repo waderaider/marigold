@@ -1,8 +1,8 @@
 ## guitarra.gd - MARIGOLD experience: Guitarra Mexicana.
 ## A rhythm-strum + free-play Mexican folk-style guitar game.
-## Plaza setting, lantern light, papel picado. ALL music is an original
-## folk-inspired waltz composed for this game (see SONG below) - no
-## copyrighted or traditional songs are used anywhere.
+## Plaza setting, lantern light, papel picado. ALL music is original,
+## composed for this game (the 3/4 waltz "Vals de Cempasuchil" and the 6/8
+## "Son del Muerto") - no copyrighted or traditional songs are used anywhere.
 ## Chapter contract: setup(ar_mode), apply_mode(on), signal chapter_complete.
 ## No class_name (experience contract). Headless-safe.
 extends Node3D
@@ -40,20 +40,92 @@ const BARS := [
 	{"root": 45, "chord": [57, 61, 64], "melody": [69, -1, -1]},
 ]
 
+# v0.5.0: second original song - "Son del Muerto", a 6/8 son jarocho-flavored
+# piece in E minor with harmonic-minor color (D#). 24 bars, eighth = 0.225 s.
+# Composed for Guitarra Mexicana; no copyrighted or traditional material.
+const BEAT2 := 0.225
+const BAR2 := 1.35
+const BARS2 := [
+	{"root": 40, "chord": [52, 55, 59], "melody": [64, 67, 69, 67, 64, 62]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [64, -1, 67, 69, 71, 69]},
+	{"root": 45, "chord": [52, 57, 60], "melody": [72, 69, 67, 69, 72, -1]},
+	{"root": 45, "chord": [52, 57, 60], "melody": [69, 67, 64, 62, 64, -1]},
+	{"root": 47, "chord": [54, 59, 62], "melody": [71, 74, 75, 74, 71, -1]},
+	{"root": 47, "chord": [54, 59, 62], "melody": [71, -1, 69, 67, 64, 62]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [64, 67, 71, 72, 71, 67]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [69, 67, 64, -1, 62, 64]},
+	{"root": 48, "chord": [52, 55, 60], "melody": [67, 72, 76, 72, 67, 64]},
+	{"root": 48, "chord": [52, 55, 60], "melody": [65, 67, 69, 67, 65, 64]},
+	{"root": 43, "chord": [55, 59, 62], "melody": [67, 71, 74, 71, 67, -1]},
+	{"root": 43, "chord": [55, 59, 62], "melody": [66, 67, 71, 69, 67, 66]},
+	{"root": 45, "chord": [52, 57, 60], "melody": [69, 72, 76, 74, 72, 69]},
+	{"root": 45, "chord": [52, 57, 60], "melody": [72, -1, 69, 67, 64, 67]},
+	{"root": 47, "chord": [54, 59, 62], "melody": [74, 75, 78, 75, 74, 71]},
+	{"root": 47, "chord": [54, 59, 62], "melody": [71, 74, 71, 69, 67, -1]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [76, 74, 71, 69, 67, 64]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [67, 69, 71, 72, 74, 76]},
+	{"root": 48, "chord": [52, 55, 60], "melody": [79, 76, 72, 69, 67, 65]},
+	{"root": 50, "chord": [54, 57, 62], "melody": [74, 73, 74, 76, 74, 73]},
+	{"root": 43, "chord": [55, 59, 62], "melody": [74, 79, 76, 74, 71, 67]},
+	{"root": 47, "chord": [54, 59, 62], "melody": [71, 75, 74, 71, 69, 67]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [64, -1, -1, -1, -1, -1]},
+	{"root": 40, "chord": [52, 55, 59], "melody": [64, -1, -1, -1, -1, -1]},
+]
+
+# Song select: key -> name, meter blurb, beat, bar, bars.
+const SONGS := {
+	"vals": {"name": "Vals de Cempasuchil", "sub": "3/4 vals · 100 BPM",
+		"beat": BEAT, "bar": BAR, "bars": BARS, "style": "waltz"},
+	"son": {"name": "Son del Muerto", "sub": "6/8 son · original",
+		"beat": BEAT2, "bar": BAR2, "bars": BARS2, "style": "son"},
+}
+
+# Difficulty tiers (v0.5.0): lead time, timing windows, note density.
+# Suave keeps the gentle experience; Bravo is the harder tier.
+const DIFFS := {
+	"suave": {"name": "Suave", "sub": "gentle · slower notes",
+		"lead": 2.6, "perfect": 0.16, "good": 0.32, "density": 0},
+	"normal": {"name": "Normal", "sub": "as composed",
+		"lead": 2.2, "perfect": 0.12, "good": 0.25, "density": 1},
+	"bravo": {"name": "Bravo", "sub": "harder · extra notes",
+		"lead": 1.7, "perfect": 0.09, "good": 0.18, "density": 2},
+}
+
 const STRING_MIDIS := [40, 45, 50, 55, 59, 64] # E2 A2 D3 G3 B3 E4
 const STRING_NAMES := ["E", "A", "D", "G", "B", "E"]
 
-enum Phase { SELECT, COUNTDOWN, PLAYING, RESULTS, FREE }
+enum Phase { SELECT, SONG, DIFF, COUNTDOWN, PLAYING, RESULTS, FREE }
 
 var _phase: int = Phase.SELECT
 var _ar_mode := false
 var _t := 0.0
+# Song + difficulty selection (v0.5.0).
+var _song_key := "vals"
+var _diff_key := "normal"
+var _beat := BEAT
+var _bar := BAR
+var _lead := LEAD_TIME
+var _perfect_win := PERFECT_WINDOW
+var _good_win := GOOD_WINDOW
+var _density := 1
+# Wind-blown plaza petals (v0.5.0): gusts visibly push them.
+var _petal_pm: ParticleProcessMaterial = null
+# String vibration juice (v0.5.0).
+var _string_mis: Array[MeshInstance3D] = []
+var _string_vib := 0.0
+var _body_mi: MeshInstance3D = null
+var _body_vib := 0.0
 
 var _ground_group: Node3D
 var _dressing: Node3D
 var _guitar: Node3D
 var _string_x: Array = []
 var _strum_bar: MeshInstance3D
+# Guitar build coordinates (set by the hero or procedural builder).
+var _string_z := 0.11
+var _string_base_z := 0.11
+var _note_z := -1.79
+var _title_y := 3.35
 
 var _score_label: Label3D
 var _judge_label: Label3D
@@ -91,8 +163,12 @@ func _ready() -> void:
 	_build_ui()
 	MarigoldPlaques.place_plaque(
 		self, "Guitarra Mexicana",
-		"An original folk-style waltz for nylon-string guitar, composed for this plaza. Strum in time with the falling marigold notes - or pick Free Play and make your own melody.",
+		"Two original folk pieces composed for this plaza: the 3/4 waltz 'Vals de Cempasuchil' and the 6/8 'Son del Muerto'. Strum in time with the falling marigold notes across three difficulty tiers - or pick Free Play and make your own melody.",
 		Vector3(-2.2, 1.5, 0.6), 1.9)
+	# Ambient life pass (v0.5.0): butterflies + horizon spirits like the
+	# chapters; petals still blow with the wind via _update_petal_wind().
+	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -2), 8, 5.0)
+	MarigoldAmbient.add_spirits(self, 5, 16.0)
 
 
 func setup(ar_mode: bool) -> void:
@@ -121,6 +197,10 @@ func _process(delta: float) -> void:
 	match _phase:
 		Phase.SELECT:
 			_update_mode_select()
+		Phase.SONG:
+			_update_mode_select()
+		Phase.DIFF:
+			_update_mode_select()
 		Phase.COUNTDOWN:
 			_update_countdown(delta)
 		Phase.PLAYING:
@@ -129,6 +209,8 @@ func _process(delta: float) -> void:
 			_update_mode_select() # reuse orb-pinch logic for Play Again / Menu
 		Phase.FREE:
 			_update_free(delta)
+	_update_string_vib(delta)
+	_update_petal_wind()
 
 
 ## ---------------- wind integration (v0.4.0) ----------------
@@ -229,6 +311,32 @@ func _build_plaza() -> void:
 	_apply_field_sway(MarigoldModels.make_flower_field(_ground_group, 160, 8.5, 4242))
 	MarigoldFX.spawn_ambient_motes(self, Vector3(0, 1.8, -1.0), 4.5, 50)
 
+	# Wind-blown plaza petals (v0.5.0): gusts visibly push them sideways.
+	var petals := GPUParticles3D.new()
+	petals.amount = 60
+	petals.lifetime = 7.0
+	petals.preprocess = 3.0
+	petals.position = Vector3(0, 2.8, -1.0)
+	_petal_pm = ParticleProcessMaterial.new()
+	_petal_pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	_petal_pm.emission_box_extents = Vector3(3.5, 0.2, 3.5)
+	_petal_pm.direction = Vector3(0, -1, 0)
+	_petal_pm.spread = 25.0
+	_petal_pm.initial_velocity_min = 0.2
+	_petal_pm.initial_velocity_max = 0.5
+	_petal_pm.gravity = Vector3(0, -0.30, 0)
+	_petal_pm.turbulence_enabled = true
+	_petal_pm.turbulence_noise_strength = 0.7
+	_petal_pm.scale_min = 0.03
+	_petal_pm.scale_max = 0.06
+	petals.process_material = _petal_pm
+	var pq := QuadMesh.new()
+	pq.size = Vector2(0.05, 0.035)
+	pq.material = MarigoldFX.glow(Color(1.0, 0.65, 0.12), 1.6)
+	petals.draw_pass_1 = pq
+	add_child(petals)
+	petals.emitting = true
+
 	_dressing = Node3D.new()
 	_dressing.name = "Dressing"
 	add_child(_dressing)
@@ -262,7 +370,60 @@ func _build_guitar() -> void:
 	root.name = "Guitar"
 	root.position = Vector3(0, 0, -1.9)
 	add_child(root)
+	_guitar = root
+	_string_x.clear()
+	_string_mis.clear()
 
+	# v0.5.0: the in-house Blender hero guitar replaces the procedural body
+	# whenever the model is present; the procedural build stays as fallback.
+	var hero := MarigoldModels.blender_model(MarigoldModels.GUITAR, "guitar")
+	if hero == null:
+		_build_guitar_procedural(root)
+	else:
+		_build_guitar_hero(root, hero)
+
+	# Strum bar: the timing line notes fall onto (both builds).
+	var bar := BoxMesh.new()
+	bar.size = Vector3(0.55, 0.05, 0.06)
+	_strum_bar = MeshInstance3D.new()
+	_strum_bar.mesh = bar
+	_strum_bar.material_override = MarigoldFX.glow(Color(1.0, 0.45, 0.10), 2.2)
+	_strum_bar.position = Vector3(0, STRUM_Y, _string_z + 0.01)
+	root.add_child(_strum_bar)
+
+	var title := MarigoldFX.make_label("Guitarra Mexicana", 64, Color(1.0, 0.80, 0.40))
+	title.position = Vector3(0, _title_y, 0)
+	root.add_child(title)
+
+
+## Hero guitar from the in-house Blender GLB (v0.5.0, generated in-house).
+## The model lies flat (neck along -Z, soundboard +Y); rotate it upright so
+## the neck points up and the soundboard faces the player, then normalize to
+## ~2.1 m so the gameplay string plane keeps its tuned coordinates.
+func _build_guitar_hero(root: Node3D, hero: Node3D) -> void:
+	var orient := Node3D.new()
+	orient.name = "HeroGuitar"
+	orient.rotation_degrees.x = 90.0 # neck -Z -> +Y, soundboard +Y -> +Z
+	root.add_child(orient)
+	orient.add_child(hero)
+	# Measure in orient space: rotation applied, scale not yet (set below).
+	var bounds := MarigoldModels.bounds_of(orient)
+	var h := bounds.size.y
+	var s := 2.1 / maxf(h, 0.01)
+	orient.scale = Vector3.ONE * s
+	orient.position.y = 0.35 - bounds.position.y * s
+	# Soundboard top surface in root space (model z -> root z after rotation).
+	_string_z = (bounds.position.z + bounds.size.z) * s + 0.03
+	_note_z = -1.9 + _string_z
+	var y0 := 0.35 + 0.20
+	var y1 := 0.35 + 2.1 - 0.35
+	_title_y = 0.35 + 2.1 + 0.45
+	_body_mi = hero.find_child("GuitarWood", true, false) as Node3D
+	_spawn_strings(root, y0, y1)
+
+
+## Procedural fallback guitar (pre-v0.5.0 look) when the hero GLB is absent.
+func _build_guitar_procedural(root: Node3D) -> void:
 	var wood := MarigoldFX.pbr(Color(0.48, 0.22, 0.09), 0.1, 0.45)
 	var wood_light := MarigoldFX.pbr(Color(0.74, 0.47, 0.22), 0.1, 0.5)
 
@@ -277,6 +438,7 @@ func _build_guitar() -> void:
 	body_mi.rotation_degrees.x = 90.0
 	body_mi.position = Vector3(0, 0.72, 0)
 	root.add_child(body_mi)
+	_body_mi = body_mi
 
 	var hole := CylinderMesh.new()
 	hole.top_radius = 0.12
@@ -324,36 +486,30 @@ func _build_guitar() -> void:
 		fmi.position = Vector3(0, 1.25 + f * 0.22, 0)
 		root.add_child(fmi)
 
+	_string_z = 0.11
+	_note_z = -1.79
+	_title_y = 3.35
+	_spawn_strings(root, 0.47, 2.77)
+
+
+## The six gameplay strings (shared by both guitar builds).
+func _spawn_strings(root: Node3D, y0: float, y1: float) -> void:
 	var string_mat := MarigoldFX.glow(Color(1.0, 0.90, 0.60), 1.8)
-	_string_x.clear()
+	_string_base_z = _string_z
 	for i in 6:
 		var sx := -0.075 + i * 0.03
 		_string_x.append(sx)
 		var s := CylinderMesh.new()
 		s.top_radius = 0.005
 		s.bottom_radius = 0.005
-		s.height = 2.3
+		s.height = y1 - y0
 		s.radial_segments = 6
 		var smi := MeshInstance3D.new()
 		smi.mesh = s
 		smi.material_override = string_mat
-		smi.position = Vector3(sx, 1.62, 0.11)
+		smi.position = Vector3(sx, (y0 + y1) * 0.5, _string_z)
 		root.add_child(smi)
-
-	# Strum bar: the timing line notes fall onto.
-	var bar := BoxMesh.new()
-	bar.size = Vector3(0.55, 0.05, 0.06)
-	_strum_bar = MeshInstance3D.new()
-	_strum_bar.mesh = bar
-	_strum_bar.material_override = MarigoldFX.glow(Color(1.0, 0.45, 0.10), 2.2)
-	_strum_bar.position = Vector3(0, STRUM_Y, 0.11)
-	root.add_child(_strum_bar)
-
-	var title := MarigoldFX.make_label("Guitarra Mexicana", 64, Color(1.0, 0.80, 0.40))
-	title.position = Vector3(0, 3.35, 0)
-	root.add_child(title)
-
-	_guitar = root
+		_string_mis.append(smi)
 
 
 ## ---- mode select / results orbs ----
@@ -419,34 +575,90 @@ func _on_orb_chosen(mode: String) -> void:
 	_clear_orbs()
 	if _hint_label:
 		_hint_label.visible = false
-	match mode:
-		"rhythm":
-			_start_rhythm()
-		"free":
-			_start_free()
-		"exit":
-			chapter_complete.emit()
+	if mode == "rhythm":
+		_build_song_select()
+	elif mode == "free":
+		_start_free()
+	elif mode == "exit":
+		chapter_complete.emit()
+	elif mode.begins_with("song:"):
+		_song_key = mode.get_slice(":", 1)
+		_build_diff_select()
+	elif mode.begins_with("diff:"):
+		_diff_key = mode.get_slice(":", 1)
+		_start_rhythm()
+
+
+func _build_song_select() -> void:
+	_phase = Phase.SONG
+	_clear_orbs()
+	for i in ["vals", "son"]:
+		var s: Dictionary = SONGS[i]
+		var x := -1.5 if i == "vals" else 1.5
+		var col := Color(1.0, 0.55, 0.12) if i == "vals" else Color(0.75, 0.35, 1.0)
+		_add_orb(Vector3(x, 1.5, -1.1), col,
+			"%s\n%s" % [String(s["name"]), String(s["sub"])], "song:" + i)
+	_hint_label.text = "Pinch an orb - choose your song"
+	_hint_label.visible = true
+
+
+func _build_diff_select() -> void:
+	_phase = Phase.DIFF
+	_clear_orbs()
+	var xs := [-2.2, 0.0, 2.2]
+	var i := 0
+	for key in ["suave", "normal", "bravo"]:
+		var d: Dictionary = DIFFS[key]
+		var col := Color(0.45, 0.9, 0.55) if key == "suave" \
+			else (Color(1.0, 0.62, 0.12) if key == "normal" else Color(1.0, 0.30, 0.25))
+		_add_orb(Vector3(xs[i], 1.5, -1.1), col,
+			"%s\n%s" % [String(d["name"]), String(d["sub"])], "diff:" + key)
+		i += 1
+	_hint_label.text = "Pinch an orb - Suave is gentle, Bravo is harder"
+	_hint_label.visible = true
 
 
 ## ---- rhythm mode ----
 
 func _start_rhythm() -> void:
+	var song: Dictionary = SONGS[_song_key]
+	var diff: Dictionary = DIFFS[_diff_key]
+	_beat = float(song["beat"])
+	_bar = float(song["bar"])
+	_lead = float(diff["lead"])
+	_perfect_win = float(diff["perfect"])
+	_good_win = float(diff["good"])
+	_density = int(diff["density"])
+	var bars: Array = song["bars"]
 	_notes.clear()
 	_backing.clear()
-	for bi in BARS.size():
-		var bar: Dictionary = BARS[bi]
-		var t0 := bi * BAR
-		for j in 3:
-			var mel: Array = bar["melody"]
+	for bi in bars.size():
+		var bar: Dictionary = bars[bi]
+		var t0 := bi * _bar
+		var mel: Array = bar["melody"]
+		for j in mel.size():
 			var midi: int = mel[j]
-			if midi > 0:
-				_notes.append({"time": t0 + j * BEAT, "midi": midi, "node": null, "hit": false, "missed": false, "spawned": false})
+			if midi <= 0:
+				continue
+			# Suave: sparser (every other note); Normal: as composed;
+			# Bravo: as composed + extra chord-tone pickups.
+			if _density == 0 and j % 2 == 1:
+				continue
+			_notes.append({"time": t0 + j * _beat, "midi": midi,
+				"node": null, "hit": false, "missed": false, "spawned": false})
+			if _density == 2 and j + 1 < mel.size():
+				var chord: Array = bar["chord"]
+				var extra: int = int(chord[(j + 1) % chord.size()]) - 12
+				_notes.append({"time": t0 + j * _beat + _beat * 0.5, "midi": extra,
+					"node": null, "hit": false, "missed": false, "spawned": false})
 		_backing.append({"time": t0, "midi": int(bar["root"]), "vol": 0.35, "played": false})
 		var chord: Array = bar["chord"]
-		for j in [1, 2]:
+		var stab_beats := [1, 2] if String(song["style"]) == "waltz" else [3]
+		for j in stab_beats:
 			for cm in chord:
-				_backing.append({"time": t0 + j * BEAT, "midi": int(cm), "vol": 0.20, "played": false})
-	_song_len = BARS.size() * BAR + 1.5
+				_backing.append({"time": t0 + j * _beat, "midi": int(cm), "vol": 0.20, "played": false})
+	_song_len = bars.size() * _bar + 1.5
+	_notes.sort_custom(func(a, b): return float(a["time"]) < float(b["time"]))
 	_song_time = 0.0
 	_score = 0
 	_combo = 0
@@ -486,7 +698,7 @@ func _update_playing(delta: float) -> void:
 			if is_instance_valid(n3d):
 				var remain: float = nt["time"] - _song_time
 				var y := STRUM_Y + (NOTE_TOP_Y - STRUM_Y) * clampf(remain / LEAD_TIME, 0.0, 1.0)
-				n3d.position = Vector3(0, y, -1.79)
+				n3d.position = Vector3(0, y, _note_z)
 				if remain < -GOOD_WINDOW:
 					nt["missed"] = true
 					_combo = 0
@@ -511,7 +723,7 @@ func _spawn_note() -> Node3D:
 	sm.height = 0.18
 	n.mesh = sm
 	n.material_override = MarigoldFX.glow(Color(1.0, 0.62, 0.12), 2.4)
-	n.position = Vector3(0, NOTE_TOP_Y, -1.79)
+	n.position = Vector3(0, NOTE_TOP_Y, _note_z)
 	add_child(n)
 	return n
 
@@ -538,7 +750,9 @@ func _on_strum() -> void:
 		node.queue_free()
 	if MarigoldState.music:
 		MarigoldState.music.pluck(int(best["midi"]), 0.9, 1.4)
-	MarigoldFX.spawn_sparks(self, Vector3(0, STRUM_Y, -1.7), Color(1.0, 0.80, 0.30), 14)
+	MarigoldFX.spawn_sparks(self, Vector3(0, STRUM_Y, _note_z + 0.09), Color(1.0, 0.80, 0.30), 14)
+	_string_vib = 1.0
+	_body_vib = 1.0
 	if best_dt <= PERFECT_WINDOW:
 		_perfects += 1
 		_score += 300
@@ -634,9 +848,11 @@ func _update_strum_strings() -> void:
 func _pluck_string(i: int, local: Vector3) -> void:
 	if MarigoldState.music != null:
 		MarigoldState.music.pluck(int(STRING_MIDIS[i]), 0.85, 1.6)
-	var hit: Vector3 = _guitar.to_global(Vector3(float(_string_x[i]), clampf(local.y, 0.5, 2.5), 0.15))
+	var hit: Vector3 = _guitar.to_global(Vector3(float(_string_x[i]), clampf(local.y, 0.5, 2.5), _string_z + 0.04))
 	MarigoldFX.spawn_sparks(self, hit, Color(1.0, 0.85, 0.40), 8)
 	_set_judge(STRING_NAMES[i], Color(1.0, 0.90, 0.60))
+	_string_vib = 1.0
+	_body_vib = 1.0
 
 
 ## ---- rhythm-mode swipe detection ----
@@ -693,3 +909,32 @@ func _hand_point(hand: int) -> Vector3:
 		return global_position + Vector3(0, 1.2, -1.6)
 	var mp := get_viewport().get_mouse_position()
 	return cam.project_ray_origin(mp) + cam.project_ray_normal(mp) * 1.6
+
+
+## ---- string vibration + wind-pushed petals (v0.5.0) ----
+
+## Struck strings wobble and the guitar body gives a subtle thump pulse.
+func _update_string_vib(delta: float) -> void:
+	if _string_vib > 0.0:
+		_string_vib = maxf(0.0, _string_vib - delta * 2.5)
+		var wob := sin(_t * 55.0) * 0.022 * _string_vib
+		for i in _string_mis.size():
+			var smi: MeshInstance3D = _string_mis[i]
+			if is_instance_valid(smi):
+				smi.position.z = _string_base_z + wob * (1.0 + 0.12 * float(i % 3))
+	if is_instance_valid(_body_mi):
+		if _body_vib > 0.0:
+			_body_vib = maxf(0.0, _body_vib - delta * 3.0)
+			var p := 1.0 + 0.025 * sin(_t * 42.0) * _body_vib
+			_body_mi.scale = Vector3(p, p, p)
+			if _body_vib <= 0.0:
+				_body_mi.scale = Vector3.ONE
+
+
+## Wind gusts push the plaza petals sideways (gravity doubles as wind drift).
+func _update_petal_wind() -> void:
+	if _petal_pm == null:
+		return
+	if MarigoldSky.instance != null:
+		var w: Vector3 = MarigoldSky.instance.get_wind_at(Vector3(0, 1.5, -1.0))
+		_petal_pm.gravity = Vector3(w.x * 1.2, -0.30, w.z * 1.2)

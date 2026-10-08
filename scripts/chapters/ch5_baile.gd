@@ -76,6 +76,10 @@ var _progress_ring: MeshInstance3D = null
 var _progress_mat: StandardMaterial3D = null
 var _candles: Array = []
 var _plaque: Node3D = null
+# Storm dims the finale (v0.5.0): weather answers gameplay.
+var _wash_light: OmniLight3D = null
+var _wash_base := 1.1
+var _storm_dim := 1.0
 # Wind + physics integration (v0.4.0).
 var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
 var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
@@ -97,6 +101,9 @@ func setup(ar_mode: bool) -> void:
 	_build_leader()
 	_build_labels()
 	_build_plaque()
+	# Ambient life pass (v0.5.0): butterflies + horizon spirits like ch1/ch2.
+	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -4), 8, 6.0)
+	MarigoldAmbient.add_spirits(self, 5, 16.0)
 	apply_mode(ar_mode)
 
 
@@ -206,7 +213,8 @@ func _update_wind_fx() -> void:
 	for d in _wind_lights:
 		var l: OmniLight3D = d["light"]
 		if is_instance_valid(l):
-			l.light_energy = float(d["base"]) * (1.0 + (0.10 + wind * 0.45) * sin(_t * 12.0 + float(d["phase"])))
+			l.light_energy = float(d["base"]) * _storm_dim \
+				* (1.0 + (0.10 + wind * 0.45) * sin(_t * 12.0 + float(d["phase"])))
 
 
 ## ---- Build ----
@@ -303,7 +311,8 @@ func _build_stage() -> void:
 		_candles.append({"node": candle, "base_y": 0.55, "phase": TAU * float(i) / 8.0})
 
 	# One warm wash light over the stage (plus the 2 candle lights = light budget).
-	MarigoldFX.make_point_light(_world, STAGE_CENTER + Vector3(0, 3.5, 0), Color(1.0, 0.70, 0.35), 1.1, 9.0)
+	_wash_light = MarigoldFX.make_point_light(_world, STAGE_CENTER + Vector3(0, 3.5, 0),
+		Color(1.0, 0.70, 0.35), _wash_base, 9.0)
 
 
 func _build_crowd() -> void:
@@ -646,6 +655,7 @@ func _process(delta: float) -> void:
 	_update_candles()
 	_update_ghosts(delta)
 	_update_wind_fx() # banners ripple, rim candle flames dance with gusts
+	_update_storm_dim(delta) # weather answers gameplay: storm dims the finale
 
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)
@@ -875,31 +885,57 @@ func _pose_matches(id: int) -> bool:
 ## ---- Animation ----
 
 func _update_dancers(delta: float) -> void:
+	var beat := _beat_phase()
 	for d in _dancers:
 		var root: Node3D = d["root"]
 		var t := _t * float(d["speed"]) + float(d["phase"])
 		var hop := 0.0
 		if _cheer_t > 0.0:
 			hop = absf(sin(_t * 9.0)) * 0.18
+		# Beat-synced pulse (v0.5.0): sharp hop right on the beat, decaying
+		# through the bar; free-run groove when the music is silent.
+		var pulse := 0.0
+		var groove := 1.0
+		if beat >= 0.0:
+			pulse = pow(1.0 - beat, 2.0)
+			groove = 0.35
 		var style: int = d["style"]
 		match style:
 			0: # bounce
-				root.position.y = float(d["base_y"]) + absf(sin(t)) * 0.12 + hop
+				root.position.y = float(d["base_y"]) + pulse * 0.16 + absf(sin(t)) * 0.12 * groove + hop
 				root.rotation.z = sin(t * 0.5) * 0.08
 			1: # sway
-				root.position.y = float(d["base_y"]) + absf(sin(t * 0.8)) * 0.06 + hop
+				root.position.y = float(d["base_y"]) + pulse * 0.07 + absf(sin(t * 0.8)) * 0.06 * groove + hop
 				root.rotation.z = sin(t) * 0.18
 				root.rotation.y = float(d["base_rot"]) + sin(t * 0.5) * 0.30
 			_: # spin
-				root.position.y = float(d["base_y"]) + absf(sin(t)) * 0.08 + hop
+				root.position.y = float(d["base_y"]) + pulse * 0.10 + absf(sin(t)) * 0.08 * groove + hop
 				root.rotation.y += delta * 1.6
 		# Arm groove (model dancers have no arm pivots - whole body dances).
 		var al: Node3D = d["arm_l"]
 		var ar: Node3D = d["arm_r"]
 		if al != null and is_instance_valid(al):
-			al.rotation.z = -0.5 - absf(sin(t)) * 0.5
+			al.rotation.z = -0.5 - (pulse * 0.5 + absf(sin(t)) * 0.5 * groove)
 		if ar != null and is_instance_valid(ar):
-			ar.rotation.z = 0.5 + absf(sin(t + 1.3)) * 0.5
+			ar.rotation.z = 0.5 + (pulse * 0.5 + absf(sin(t + 1.3)) * 0.5 * groove)
+
+
+## Null-safe music lookup (headless-safe); mirrors ch1's _viva_music().
+func _music():
+	if not is_inside_tree():
+		return null
+	var st := get_tree().root.get_node_or_null("MarigoldState")
+	if st == null:
+		return null
+	return st.get("music")
+
+
+## Current beat phase 0..1 from the mood loop, -1 when nothing plays.
+func _beat_phase() -> float:
+	var m = _music()
+	if m != null and m.has_method("get_beat_phase"):
+		return float(m.call("get_beat_phase"))
+	return -1.0
 
 
 func _update_leader(delta: float) -> void:
@@ -909,8 +945,12 @@ func _update_leader(delta: float) -> void:
 	_leader_arm_l.rotation = _leader_arm_l.rotation.lerp(_leader_al_target, k)
 	_leader_arm_r.rotation = _leader_arm_r.rotation.lerp(_leader_ar_target, k)
 	_leader_body.rotation = _leader_body.rotation.lerp(_leader_lean_target, k)
-	# Gentle bob.
-	_leader.position.y = STAGE_TOP_Y + 0.5 + absf(sin(_t * 2.2)) * 0.05
+	# Gentle bob, sharper on the beat (v0.5.0).
+	var beat := _beat_phase()
+	var pulse := 0.0
+	if beat >= 0.0:
+		pulse = pow(1.0 - beat, 2.0)
+	_leader.position.y = STAGE_TOP_Y + 0.5 + pulse * 0.09 + absf(sin(_t * 2.2)) * 0.05
 	# Wave oscillation during the "Wave hello!" demo.
 	if _move_idx == 2 and (_phase == "demo" or _phase == "do"):
 		_leader_arm_r.rotation.z += sin(_t * 8.0) * 0.35
@@ -920,3 +960,15 @@ func _update_candles() -> void:
 	for c in _candles:
 		var n: Node3D = c["node"]
 		n.position.y = float(c["base_y"]) + sin(_t * 2.0 + float(c["phase"])) * 0.05
+
+
+## Storm dims the finale lighting (v0.5.0): when the sky darkens, the stage
+## wash and candle lights follow smoothly. No new lights - just grading.
+func _update_storm_dim(delta: float) -> void:
+	var target := 1.0
+	if MarigoldSky.instance != null:
+		target = clampf(MarigoldSky.instance.get_dim(), 0.35, 1.0)
+	_storm_dim = lerpf(_storm_dim, target, clampf(delta * 1.5, 0.0, 1.0))
+	if _wash_light != null and is_instance_valid(_wash_light):
+		_wash_light.light_energy = _wash_base * _storm_dim
+	# (Candle-light dim is applied absolutely inside _update_wind_fx.)

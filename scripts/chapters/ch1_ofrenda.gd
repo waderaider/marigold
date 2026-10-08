@@ -48,6 +48,21 @@ var _pinch_prev := false
 var _ember_mats: Array[StandardMaterial3D] = []
 var _t := 0.0
 var _stage_home := Vector3(0, 0, -1.8)
+# Ofrenda Viva night sequence (v0.5.0): set after _celebrate().
+var _viva := false
+var _viva_t := 0.0
+var _viva_phase := ""
+var _viva_dancers: Array = []
+var _viva_exiting := false
+var _viva_petals_done := false
+var _viva_bower: Dictionary = {}
+var _viva_bow_t := 0.0
+var _viva_night_from := 18.4
+var _viva_names := ["Abuela Rosa", "Abuelo Tomas", "Tia Luz"]
+var _viva_name_labels: Array[Label3D] = []
+var _viva_photo_step := 0
+var _frame_glow: Array = [] # {"photo": ShaderMaterial, "edge": StandardMaterial3D, "pos": Vector3}
+var _viva_spawned := false
 # Wind + physics integration (v0.4.0).
 var _banner_mats: Array[ShaderMaterial] = [] # papel banner vertex-shader mats
 var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
@@ -117,6 +132,10 @@ func _process(delta: float) -> void:
 		var p: Vector3 = _pointer_pos()
 		p.y += 0.05 * sin(_t * 4.0)
 		_held.global_position = p
+	# Ofrenda Viva night sequence drives the scene; the player just watches.
+	if _viva:
+		_update_viva(delta)
+		return
 	# Pinch interaction: local edge detector (avoids the missing
 	# "trigger_click" action in the shared helper's fallback chain).
 	if _pinch_edge():
@@ -360,6 +379,25 @@ func _build_ofrenda() -> void:
 		_candles.append(_make_candle(s))
 		_candle_lit.append(false)
 
+	# In-house Blender tall candles (decorative, unlit) flanking tier 1.
+	# Measured AABB: base at +0.09, 0.287m tall. Static glow flames only —
+	# the 5 interactive candles keep the real light budget.
+	for cx in [-1.02, 1.02]:
+		var tall := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_tall")
+		if tall == null:
+			continue
+		var base_y := 0.545
+		tall.position = Vector3(cx, base_y - 0.09, 0.28)
+		_ofrenda.add_child(tall)
+		var tflame := SphereMesh.new()
+		tflame.radius = 0.016
+		tflame.height = 0.05
+		var tflame_mi := MeshInstance3D.new()
+		tflame_mi.mesh = tflame
+		tflame_mi.material_override = MarigoldFX.glow(Color(1.0, 0.65, 0.15), 3.0)
+		tflame_mi.position = Vector3(cx, base_y + 0.287 + 0.02, 0.28)
+		_ofrenda.add_child(tflame_mi)
+
 	# Decorative food offerings (non-interactive): bread + cups on tier 1.
 	var bread_mat := MarigoldFX.pbr(Color(0.85, 0.62, 0.35), 0.0, 0.85)
 	for bx in [-0.35, 0.35]:
@@ -438,6 +476,16 @@ func _build_offerings() -> void:
 
 
 func _make_pan_de_muerto() -> Node3D:
+	# In-house Blender hero loaf (measured AABB base at +0.0755, 0.2m wide).
+	var hero := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "pan_de_muerto")
+	if hero != null:
+		var pivot := Node3D.new()
+		pivot.name = "PanDeMuerto"
+		hero.scale = Vector3(0.85, 0.85, 0.85)
+		hero.position.y = -0.0755 * 0.85
+		pivot.add_child(hero)
+		return pivot
+	# Fallback: procedural loaf.
 	var root := Node3D.new()
 	root.name = "PanDeMuerto"
 	var bread_mat := MarigoldFX.pbr(Color(0.80, 0.55, 0.28), 0.0, 0.85)
@@ -818,6 +866,9 @@ func _build_backdrop() -> void:
 	_apply_field_sway(MarigoldModels.make_flower_field(_backdrop, 200, 8.0, 314))
 	MarigoldFX.make_god_ray(_backdrop, Vector3(0, 0, 0), 8.0)
 	MarigoldFX.make_god_ray(_backdrop, Vector3(-3.5, 0, -1.5), 8.0, Color(1.0, 0.5, 0.7))
+	# Ambient life (v0.5.0): spirit butterflies + distant silhouettes.
+	MarigoldAmbient.add_butterflies(_backdrop, Vector3(0, 1.6, 0), 8, 4.5)
+	MarigoldAmbient.add_spirits(_backdrop, 5, 15.0)
 	var b1 := MarigoldFX.make_papel_banner(_backdrop, 4.0, 1.1, Color(1.0, 0.35, 0.55))
 	b1.position = Vector3(-2.0, 2.6, -3.2)
 	_track_banner(b1)
@@ -940,6 +991,9 @@ void fragment() {
 	photo_mi.mesh = photo
 	photo_mi.position = Vector3(0, 0.23, 0.020)
 	root.add_child(photo_mi)
+	# Ofrenda Viva: remember the glow materials so photos can ignite one by one.
+	_frame_glow.append({"photo": sm, "edge": edge_mi.material_override,
+		"base": tints[variant % tints.size()], "lit": false})
 	return root
 
 
@@ -1222,4 +1276,234 @@ func _celebrate() -> void:
 	MarigoldFX.scatter_petals(self, _ofrenda.to_global(Vector3(0, 3.3, -0.78)), 50)
 	MarigoldFX.spawn_sparks(self, _ofrenda.to_global(Vector3(0, 2.4, -0.78)), Color(1.0, 0.85, 0.4), 30)
 	await get_tree().create_timer(2.0).timeout
-	chapter_complete.emit()
+	# v0.5.0: instead of ending, the ofrenda comes alive - Ofrenda Viva.
+	_start_ofrenda_viva()
+
+## ---------------- Ofrenda Viva (v0.5.0) ----------------
+## The night-time living-ofrenda sequence: after the offering is complete,
+## night falls, the three photos ignite one by one with chimes and names,
+## five calavera dancers emerge and dance BEAT-SYNCED around the player,
+## marigold petals fall from the ceiling, and one dancer bows to the player.
+## Light budget: no new lights - the 3 candle omnis are re-graded warm.
+
+func _viva_music():
+	if not is_inside_tree():
+		return null
+	var st := get_tree().root.get_node_or_null("MarigoldState")
+	if st == null:
+		return null
+	return st.get("music")
+
+
+func _viva_cam_pos() -> Vector3:
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		return cam.global_position
+	return Vector3(0, 1.6, 1.5)
+
+
+func _start_ofrenda_viva() -> void:
+	_viva = true
+	_viva_t = 0.0
+	_viva_phase = "nightfall"
+	_viva_photo_step = 0
+	if MarigoldSky.instance != null:
+		_viva_night_from = MarigoldSky.instance.get_time_of_day()
+	_toast("La noche cae... la ofrenda despierta", 5.0)
+	MarigoldHaptics.sub_bass(1.2)
+
+
+func _update_viva(delta: float) -> void:
+	_viva_t += delta
+	var t := _viva_t
+	# Nightfall: ease the sky from dusk to midnight over ~7 s.
+	if MarigoldSky.instance != null and t < 8.0:
+		var k := clampf(t / 7.0, 0.0, 1.0)
+		var eased := k * k * (3.0 - 2.0 * k)
+		MarigoldSky.instance.set_time_of_day(lerpf(_viva_night_from, 0.0, eased))
+	# Warm passthrough grade ramps in during AR night.
+	if _ar_mode:
+		MarigoldPassthroughGrade.set_warm_weight(clampf((t - 3.0) / 6.0, 0.0, 1.0) * 0.85)
+	# Candlelight grade: flames breathe deeper, lights run warmer and wilder
+	# so the glow feels like it moves across the player's face.
+	_viva_candle_grade()
+	# Photos ignite one by one: t = 4, 6.5, 9.
+	if _viva_photo_step < 3 and t >= 4.0 + _viva_photo_step * 2.5:
+		_ignite_photo(_viva_photo_step)
+		_viva_photo_step += 1
+	_pulse_photo_glow()
+	# Dancers emerge at t = 7, staggered.
+	if not _viva_spawned and t >= 7.0:
+		_viva_spawned = true
+		_spawn_viva_dancers()
+	# Ceiling petal fall for the dance.
+	if not _viva_petals_done and t >= 8.0:
+		_viva_petals_done = true
+		var c := _viva_cam_pos()
+		c.y = 0.0
+		MarigoldFX.petal_ceiling_fall(self, c, 2.8, 130, 24.0, 3.4)
+	# Beat-synced dance (with staggered rise from the ground first).
+	var m = _viva_music()
+	var beat := -1.0
+	if m != null and m.has_method("get_beat_phase"):
+		beat = m.call("get_beat_phase")
+	for d in _viva_dancers:
+		if d.get("exiting", false):
+			continue
+		if d == _viva_bower and _viva_phase == "bow":
+			continue # the bower holds its bow
+		if not _viva_rise(d, delta):
+			MarigoldCalavera.dance_update(d, beat, _t, delta)
+	# The bow: at t = 28 the lead dancer stops, faces the player, bows.
+	if _viva_phase != "bow" and t >= 28.0 and not _viva_dancers.is_empty():
+		_viva_phase = "bow"
+		_viva_bower = _viva_dancers[0]
+		_viva_bow_t = 0.0
+		_toast("Mira - te saluda", 4.0)
+		if m != null and m.has_method("chime"):
+			m.call("chime", 84, 0.7)
+		MarigoldHaptics.confirm()
+	if _viva_phase == "bow":
+		_update_bow(delta)
+	# Exits: dancers sink away staggered from t = 33.
+	if not _viva_exiting and t >= 33.0:
+		_viva_exiting = true
+		for i in _viva_dancers.size():
+			var dd: Dictionary = _viva_dancers[i]
+			if dd == _viva_bower:
+				dd["exit_delay"] = 1.8
+			else:
+				dd["exit_delay"] = float(i) * 0.35
+	if _viva_exiting:
+		var all_gone := true
+		for d in _viva_dancers:
+			var delay: float = float(d.get("exit_delay", 0.0))
+			if delay > 0.0:
+				d["exit_delay"] = delay - delta
+				all_gone = false
+				continue
+			if not d.get("exiting", false):
+				MarigoldCalavera.begin_exit(d, self)
+			if not MarigoldCalavera.update_exit(d, delta):
+				all_gone = false
+		if all_gone:
+			_viva = false
+			if _ar_mode:
+				MarigoldPassthroughGrade.clear()
+			chapter_complete.emit()
+
+
+## Staggered rise from the ground; returns true while still emerging.
+func _viva_rise(d: Dictionary, delta: float) -> bool:
+	var rise: float = float(d.get("rise_t", 1.0))
+	if rise >= 1.0:
+		return false
+	rise = minf(1.0, rise + delta / 1.6)
+	d["rise_t"] = rise
+	if rise > 0.0:
+		var e := rise * rise * (3.0 - 2.0 * rise)
+		var root: Node3D = d["root"]
+		if root != null and is_instance_valid(root):
+			root.position.y = lerpf(-1.9, float(d.get("base_y", 0.0)), e)
+	return true
+
+
+func _viva_candle_grade() -> void:
+	# Deepen the flame flicker and warm the real lights during the sequence.
+	var wind := _wind_strength()
+	for i in _flame_mats.size():
+		MarigoldFX.pulse_glow(_flame_mats[i], 3.4, 1.6 * (0.5 + wind * 2.0),
+			_t * 1.4 + float(i) * 1.7, 10.0)
+	for d in _candle_lights:
+		var l: OmniLight3D = d["light"]
+		if is_instance_valid(l):
+			l.light_color = Color(1.0, 0.55, 0.20) # deep amber grade
+			l.light_energy = float(d["base"]) * (1.15 + 0.30 * sin(_t * 9.0 + float(d["phase"])))
+
+
+func _ignite_photo(idx: int) -> void:
+	if idx < 0 or idx >= _frame_glow.size():
+		return
+	var g: Dictionary = _frame_glow[idx]
+	g["lit"] = true
+	var m = _viva_music()
+	if m != null and m.has_method("chime"):
+		m.call("chime", [72, 76, 79][idx % 3], 0.65)
+	MarigoldHaptics.confirm()
+	# Name label fades in above the frame.
+	var pos := Vector3(0, 1.6, 0.5)
+	if idx < _frames.size() and is_instance_valid(_frames[idx]):
+		pos = (_frames[idx] as Node3D).global_position + Vector3(0, 0.62, 0)
+	var lab := MarigoldFX.make_label(_viva_names[idx % _viva_names.size()], 56, Color(1.0, 0.85, 0.5))
+	lab.position = pos
+	lab.modulate = Color(1, 1, 1, 0)
+	add_child(lab)
+	_viva_name_labels.append(lab)
+	var tw := create_tween()
+	tw.tween_property(lab, "modulate:a", 1.0, 1.6)
+	# A warm burst at the frame.
+	MarigoldFX.spawn_sparks(self, pos + Vector3(0, -0.3, 0), Color(1.0, 0.75, 0.3), 14)
+
+
+func _pulse_photo_glow() -> void:
+	for i in _frame_glow.size():
+		var g: Dictionary = _frame_glow[i]
+		if not bool(g.get("lit", false)):
+			continue
+		var k := 0.5 + 0.5 * sin(_t * 3.0 + float(i) * 2.1)
+		var base: Color = g["base"]
+		var hot := base.lerp(Color(1.8, 1.5, 1.0), k * 0.75)
+		var sm := g["photo"] as ShaderMaterial
+		if sm != null:
+			sm.set_shader_parameter("glow_col", hot)
+		var edge := g["edge"] as StandardMaterial3D
+		MarigoldFX.pulse_glow(edge, 1.6, 1.4 * k, _t, 3.0)
+
+
+func _spawn_viva_dancers() -> void:
+	var accents := [
+		Color(1.0, 0.30, 0.60), Color(0.20, 0.90, 1.00), Color(1.00, 0.65, 0.10),
+		Color(0.70, 0.30, 1.00), Color(0.20, 1.00, 0.80),
+	]
+	var cam := _viva_cam_pos()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261101
+	for i in 5:
+		var d := MarigoldCalavera.make_dancer(accents[i], rng.randf_range(0.92, 1.05))
+		var root: Node3D = d["root"]
+		var a := TAU * float(i) / 5.0 + 0.35
+		var r := rng.randf_range(2.0, 2.6)
+		var pos := Vector3(cam.x + cos(a) * r, -1.9, cam.z + sin(a) * r)
+		root.position = pos
+		add_child(root)
+		MarigoldCalavera.face_player(root, cam)
+		d["phase"] = rng.randf() * TAU
+		d["style"] = i % 3
+		d["base_y"] = 0.0
+		d["base_rot"] = root.rotation.y
+		d["energy"] = 1.0
+		d["spin_dir"] = 1.0 if i % 2 == 0 else -1.0
+		d["dancer_scale"] = 0.92 + float(i % 3) * 0.06
+		d["rise_t"] = -float(i) * 0.5 # staggered emergence
+		_viva_dancers.append(d)
+		MarigoldFX.spawn_sparks(self, Vector3(pos.x, 0.4, pos.z), Color(1.0, 0.7, 0.2), 16)
+	_toast("Los calaveras bailan para ti", 4.0)
+
+
+func _update_bow(delta: float) -> void:
+	if _viva_bower.is_empty():
+		return
+	_viva_bow_t += delta
+	var root: Node3D = _viva_bower["root"]
+	if root == null or not is_instance_valid(root):
+		return
+	# Rise into place first (in case the bow started mid-rise).
+	var base_y: float = float(_viva_bower.get("base_y", 0.0))
+	if root.position.y < base_y:
+		root.position.y = minf(base_y, root.position.y + delta * 2.0)
+	MarigoldCalavera.face_player(root, _viva_cam_pos())
+	# Bow in over 1.5 s, hold, then release slightly as the exits begin.
+	var bow_k := clampf(_viva_bow_t / 1.5, 0.0, 1.0)
+	if _viva_t > 32.0:
+		bow_k = 1.0 - clampf((_viva_t - 32.0) / 1.5, 0.0, 1.0) * 0.4
+	MarigoldCalavera.set_bow(_viva_bower, bow_k)

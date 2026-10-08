@@ -1,6 +1,7 @@
 ## ch3_alebrijes.gd - MARIGOLD Chapter 3: Plaza de los Alebrijes.
-## A festive plaza with four ORIGINAL spirit-animal guides (jaguar-moth, axolotl-
-## hummingbird, coyote-serpent, rabbit-owl). Feed each guide a light orb to make
+## A festive plaza with four spirit-animal guides: three in-house Blender hero
+## alebrijes (winged jaguar, horned serpent, many-eyed deer) plus one
+## procedural axolotl-hummingbird. Feed each guide a light orb to make
 ## it happy; feeding all four completes the chapter. Bonus: a playable guitar
 ## corner (hand-strummed via pointer tracking + MarigoldState.music.pluck).
 ## Original folk-art IP only - no film references of any kind.
@@ -14,18 +15,27 @@ const AIM_MAX_DIST := 4.0
 const STRING_MIDIS := [40, 45, 50, 55, 59, 64] # E2 A2 D3 G3 B3 E4
 
 const GUIDE_DEFS := [
-	{"name": "Xochi", "sub": "jaguar-moth",
+	{"name": "Xochi", "sub": "winged jaguar",
 		"body": Color(0.95, 0.45, 0.10), "accent": Color(1.0, 0.78, 0.25),
-		"glow": Color(1.0, 0.55, 0.15), "feature": "moth_wings"},
+		"glow": Color(1.0, 0.55, 0.15), "feature": "moth_wings",
+		"model": "alebrije_jaguar", "personality": "burst",
+		"wings": ["JaguarWing_L", "JaguarWing_R"], "head": "JaguarHead",
+		"tail": "JaguarTail", "ears": ["JaguarEar_L", "JaguarEar_R"]},
 	{"name": "Tlanetl", "sub": "axolotl-hummingbird",
 		"body": Color(0.95, 0.38, 0.58), "accent": Color(0.35, 0.90, 1.0),
 		"glow": Color(1.0, 0.40, 0.70), "feature": "gills"},
-	{"name": "Mictli", "sub": "coyote-serpent",
+	{"name": "Mictli", "sub": "horned serpent",
 		"body": Color(0.16, 0.72, 0.62), "accent": Color(0.60, 1.0, 0.55),
-		"glow": Color(0.30, 1.0, 0.80), "feature": "serpent_tail"},
-	{"name": "Papalotl", "sub": "rabbit-owl",
+		"glow": Color(0.30, 1.0, 0.80), "feature": "serpent_tail",
+		"model": "alebrije_serpent", "personality": "rattle",
+		"wings": ["SerpentWing_L", "SerpentWing_R"], "head": "SerpentHead",
+		"tail": "SerpentRattle", "ears": ["SerpentHorn_L", "SerpentHorn_R"]},
+	{"name": "Papalotl", "sub": "many-eyed deer",
 		"body": Color(0.55, 0.35, 0.95), "accent": Color(1.0, 0.85, 0.35),
-		"glow": Color(0.70, 0.45, 1.0), "feature": "rabbit_ears"},
+		"glow": Color(0.70, 0.45, 1.0), "feature": "rabbit_ears",
+		"model": "alebrije_deer", "personality": "twitch",
+		"wings": [], "head": "DeerHead",
+		"tail": "DeerTail", "ears": ["DeerEar_L", "DeerEar_R"]},
 ]
 
 const BANNER_COLORS := [
@@ -66,6 +76,9 @@ func _ready() -> void:
 	_build_guides()
 	_build_guitar()
 	_build_ui()
+	# Ambient life pass (v0.5.0): the plaza breathes like the other chapters.
+	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -2), 8, 5.0)
+	MarigoldAmbient.add_spirits(self, 5, 16.0)
 
 
 func setup(ar_mode: bool) -> void:
@@ -565,6 +578,13 @@ func _build_guide(def: Dictionary, idx: int) -> Dictionary:
 	root.name = "Guide%d_%s" % [idx, String(def["name"])]
 	add_child(root)
 
+	# v0.5.0: in-house Blender hero models replace the procedural blobs.
+	if def.has("model"):
+		var hero := _build_hero_guide(def, idx, root)
+		if not hero.is_empty():
+			return hero
+		# Model missing: fall through to the procedural builder.
+
 	var body_col: Color = def["body"]
 	var accent: Color = def["accent"]
 	var feature: String = def["feature"]
@@ -697,6 +717,75 @@ func _build_guide(def: Dictionary, idx: int) -> Dictionary:
 	sl.position = Vector3(0, 1.5, 0)
 	root.add_child(sl)
 
+	return g
+
+
+## Hero guide from an in-house Blender GLB (v0.5.0, generated in-house with
+## Blender - no license encumbrance). Same dict contract as _build_guide, so
+## the personality animation system drives the model's own parts (wings,
+## head, tail, ears/horns). Returns {} when the model is missing (caller
+## falls back to the procedural builder).
+func _build_hero_guide(def: Dictionary, idx: int, root: Node3D) -> Dictionary:
+	var model := MarigoldModels.blender_model(MarigoldModels.ALEBRIJES, String(def["model"]))
+	if model == null:
+		return {}
+	var wrap := Node3D.new()
+	wrap.name = "Model"
+	root.add_child(wrap)
+	wrap.add_child(model)
+	# Normalize: ~1.25 m tall, feet at y = 0.
+	var bounds := MarigoldModels.bounds_of(model)
+	var h := bounds.size.y
+	if h > 0.01:
+		var s := 1.25 / h
+		wrap.scale = Vector3.ONE * s
+		wrap.position.y = -bounds.position.y * s
+	# Vertex colors + soft emissive so the glow pulse breathes on the model.
+	var accent: Color = def["accent"]
+	var mats := MarigoldModels.enable_vertex_colors(model, accent, 0.35)
+	# Glowing eyes (every *eye* part).
+	var eye_mat := MarigoldFX.glow(def["glow"], 2.2)
+	var stack: Array = [model]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D and String(n.name).to_lower().contains("eye"):
+			(n as MeshInstance3D).material_override = eye_mat
+		for c in n.get_children():
+			stack.append(c)
+	mats.append(eye_mat)
+	# Map the model's parts to the animation slots.
+	var g := {
+		"node": root, "def": def, "fed": false, "hop_t": -1.0,
+		"phase": float(idx) * 1.7, "base_y": 0.0, "home_y": 0.0,
+		"home": Transform3D.IDENTITY, "home_yaw": 0.0, "mats": mats,
+		"wing_l": null, "wing_r": null, "tail": null,
+		"head": null, "ear_l": null, "ear_r": null,
+		"bob_amp": 0.06, "bob_speed": 2.0, "flap_speed": 7.0,
+		"personality": String(def.get("personality", "")),
+		"personality_t": 3.0 + float(idx) * 1.3,
+		"action_t": 0.0, "joy_t": 0.0,
+	}
+	var wings: Array = def.get("wings", [])
+	if wings.size() >= 2:
+		g["wing_l"] = model.find_child(String(wings[0]), true, false) as Node3D
+		g["wing_r"] = model.find_child(String(wings[1]), true, false) as Node3D
+	g["head"] = model.find_child(String(def.get("head", "")), true, false) as Node3D
+	g["tail"] = model.find_child(String(def.get("tail", "")), true, false) as Node3D
+	var ears: Array = def.get("ears", [])
+	if ears.size() >= 2:
+		g["ear_l"] = model.find_child(String(ears[0]), true, false) as Node3D
+		g["ear_r"] = model.find_child(String(ears[1]), true, false) as Node3D
+	# Rest poses: the animator adds offsets on top (procedural pivots rest at 0).
+	for slot in ["wing_l", "wing_r", "tail", "head", "ear_l", "ear_r"]:
+		var part: Node3D = g[slot]
+		g[slot + "_rest"] = part.rotation if part != null else Vector3.ZERO
+	# Name labels (same heights as the procedural guides).
+	var nl := MarigoldFX.make_label(String(def["name"]), 56, Color(1.0, 0.9, 0.6))
+	nl.position = Vector3(0, 1.75, 0)
+	root.add_child(nl)
+	var sl := MarigoldFX.make_label(String(def["sub"]), 36, Color(0.9, 0.85, 0.95))
+	sl.position = Vector3(0, 1.5, 0)
+	root.add_child(sl)
 	return g
 
 
@@ -1058,30 +1147,33 @@ func _animate_guides(delta: float) -> void:
 			g["action_t"] = maxf(0.0, action - delta)
 		# Idle bob (per-guide rhythm).
 		node.position.y = y + sin(_t * float(g["bob_speed"]) + ph) * float(g["bob_amp"])
-		# Wing flap (moth does periodic big bursts).
+		# Wing flap (moth does periodic big bursts). Rest-relative so hero
+		# GLB parts keep their modeled pose (procedural pivots rest at 0).
 		if g["wing_l"] != null:
 			var fs: float = float(g["flap_speed"])
 			if personality == "burst" and action > 0.0:
 				fs *= 3.0
 			var flap := sin(_t * fs + ph) * 0.55
-			(g["wing_l"] as Node3D).rotation.z = 0.25 + flap
-			(g["wing_r"] as Node3D).rotation.z = -0.25 - flap
+			(g["wing_l"] as Node3D).rotation.z = float((g.get("wing_l_rest", Vector3.ZERO) as Vector3).z) + 0.25 + flap
+			(g["wing_r"] as Node3D).rotation.z = float((g.get("wing_r_rest", Vector3.ZERO) as Vector3).z) - 0.25 - flap
 		# Tail: serpent rattles its tail; others sway.
 		if g["tail"] != null:
+			var tail_rest: Vector3 = g.get("tail_rest", Vector3.ZERO)
 			if personality == "rattle" and action > 0.0:
-				(g["tail"] as Node3D).rotation.y = sin(_t * 30.0) * 0.35
+				(g["tail"] as Node3D).rotation.y = tail_rest.y + sin(_t * 30.0) * 0.35
 			else:
-				(g["tail"] as Node3D).rotation.y = sin(_t * 2.4 + ph) * 0.5
+				(g["tail"] as Node3D).rotation.y = tail_rest.y + sin(_t * 2.4 + ph) * 0.5
 		# Rabbit ear twitch.
 		if personality == "twitch" and g["ear_l"] != null:
 			var tw := 0.0
 			if action > 0.0:
 				tw = sin(_t * 25.0) * 0.30
-			(g["ear_l"] as Node3D).rotation.z = 0.18 + tw
-			(g["ear_r"] as Node3D).rotation.z = -0.18 - tw
+			(g["ear_l"] as Node3D).rotation.z = float((g.get("ear_l_rest", Vector3.ZERO) as Vector3).z) + 0.18 + tw
+			(g["ear_r"] as Node3D).rotation.z = float((g.get("ear_r_rest", Vector3.ZERO) as Vector3).z) - 0.18 - tw
 		# Curiosity: the head tracks the nearest hand within 2.5 m.
 		var head: Node3D = g["head"]
 		if head != null:
+			var head_rest: Vector3 = g.get("head_rest", Vector3.ZERO)
 			var gp: Vector3 = node.global_position
 			var best_d := 2.5
 			var target_hp := Vector3.ZERO
@@ -1097,7 +1189,7 @@ func _animate_guides(delta: float) -> void:
 				target_yaw = clampf(atan2(-local_t.x, -local_t.z), -0.7, 0.7)
 			else:
 				target_yaw = sin(_t * 0.6 + ph) * 0.30
-			head.rotation.y = lerpf(head.rotation.y, target_yaw, minf(1.0, delta * 4.0))
+			head.rotation.y = lerpf(head.rotation.y, head_rest.y + target_yaw, minf(1.0, delta * 4.0))
 		# Eye glow pulse.
 		for m in g["mats"]:
 			MarigoldFX.pulse_glow(m, 1.6, 0.9, _t + ph, 2.5)

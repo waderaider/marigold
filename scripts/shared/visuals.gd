@@ -438,6 +438,8 @@ static func make_night_sky(parent: Node) -> WorldEnvironment:
 
 
 ## Luminous water plane with slow animated shimmer.
+## v0.5.0: rain_amount uniform (0..1) adds expanding rain-ripple rings;
+## set it per frame from MarigoldSky.get_rain_amount() via set_water_rain().
 static func make_luminous_water(parent: Node3D, size: float = 30.0) -> MeshInstance3D:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(size, size)
@@ -449,14 +451,26 @@ shader_type spatial;
 render_mode unshaded;
 uniform vec4 deep : source_color = vec4(0.02, 0.05, 0.16, 1.0);
 uniform vec4 glint : source_color = vec4(1.0, 0.55, 0.15, 1.0);
+uniform float rain_amount : hint_range(0.0, 1.0) = 0.0;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void vertex() {
 	VERTEX.y += sin(VERTEX.x * 1.5 + TIME * 1.2) * 0.03 + cos(VERTEX.z * 1.8 + TIME * 0.9) * 0.03;
 }
 void fragment() {
 	float w = sin(UV.x * 60.0 + TIME * 1.5) * sin(UV.y * 60.0 - TIME * 1.1);
 	float sparkle = smoothstep(0.75, 1.0, w);
-	ALBEDO = mix(deep.rgb, glint.rgb, sparkle * 0.5);
-	EMISSION = glint.rgb * sparkle * 0.8;
+	// Rain ripples: per-cell expanding rings, cheap procedural.
+	float rings = 0.0;
+	if (rain_amount > 0.01) {
+		vec2 cell = floor(UV * 46.0);
+		float h = hash(cell);
+		float cycle = fract(TIME * (0.45 + h * 0.6) + h * 7.0);
+		float d = length(fract(UV * 46.0) - 0.5);
+		float ring = smoothstep(0.06, 0.0, abs(d - cycle * 0.5));
+		rings = ring * (1.0 - cycle) * rain_amount * step(h, rain_amount);
+	}
+	ALBEDO = mix(deep.rgb, glint.rgb, sparkle * 0.5 + rings * 0.35);
+	EMISSION = glint.rgb * (sparkle * 0.8 + rings * 1.2);
 }
 """
 	var sm := ShaderMaterial.new()
@@ -466,6 +480,73 @@ void fragment() {
 	mi.mesh = plane
 	parent.add_child(mi)
 	return mi
+
+
+## Set the rain-ripple amount on a make_luminous_water surface (0..1).
+static func set_water_rain(water_mi: MeshInstance3D, amount: float) -> void:
+	if water_mi == null or not is_instance_valid(water_mi):
+		return
+	var pm := water_mi.mesh as PrimitiveMesh
+	if pm == null:
+		return
+	var sm := pm.material as ShaderMaterial
+	if sm != null:
+		sm.set_shader_parameter("rain_amount", clampf(amount, 0.0, 1.0))
+
+
+## Marigold petals falling FROM THE CEILING (Ofrenda Viva, v0.5.0).
+## Looping GPUParticles3D, box emission at ceiling height, slow fluttering
+## fall with wind drift. Auto-stops after `duration` and frees itself.
+## 1 particle system, capped at `amount` (default 120).
+static func petal_ceiling_fall(parent: Node, center: Vector3, radius: float = 2.5,
+		amount: int = 120, duration: float = 20.0, ceiling_y: float = 3.2) -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	p.amount = amount
+	p.lifetime = 6.0
+	p.preprocess = 2.0
+	p.position = center + Vector3(0, ceiling_y, 0)
+	var mat := ParticleProcessMaterial.new()
+	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	mat.emission_box_extents = Vector3(radius, 0.1, radius)
+	mat.direction = Vector3(0, -1, 0)
+	mat.spread = 18.0
+	mat.initial_velocity_min = 0.25
+	mat.initial_velocity_max = 0.6
+	mat.gravity = Vector3(0, -0.35, 0)
+	mat.damping_min = 0.4
+	mat.damping_max = 0.9
+	# Flutter: sideways wobble so petals drift instead of dropping straight.
+	mat.turbulence_enabled = true
+	mat.turbulence_noise_strength = 0.6
+	mat.turbulence_noise_scale = 1.5
+	mat.scale_min = 0.03
+	mat.scale_max = 0.07
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1.0, 0.62, 0.10, 0.95))
+	grad.add_point(0.5, Color(1.0, 0.80, 0.25, 0.9))
+	grad.set_color(1, Color(0.85, 0.35, 0.05, 0.0))
+	var ramp := GradientTexture1D.new()
+	ramp.gradient = grad
+	mat.color_ramp = ramp
+	p.process_material = mat
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.05, 0.035)
+	quad.material = glow(Color(1.0, 0.65, 0.12), 1.6)
+	p.draw_pass_1 = quad
+	parent.add_child(p)
+	p.emitting = true
+	var t := parent.get_tree().create_timer(duration)
+	t.timeout.connect(_stop_ceiling_fall.bind(p))
+	return p
+
+
+static func _stop_ceiling_fall(p: GPUParticles3D) -> void:
+	if is_instance_valid(p):
+		p.emitting = false
+		var tree := p.get_tree()
+		if tree != null:
+			var t := tree.create_timer(7.0) # let the last petals land
+			t.timeout.connect(p.queue_free)
 
 
 ## Burst of glowing marigold petals (celebration / footstep scatter).

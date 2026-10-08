@@ -141,3 +141,85 @@ static func clamp_to_room(pos: Vector3, margin: float = 0.3) -> Vector3:
 static func passthrough_friendly(mat: StandardMaterial3D) -> StandardMaterial3D:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	return mat
+
+
+## ---- Grab / throw vocabulary (v0.5.0, for Mano Magica) ----
+## Built on pinch_active + pointer_position so it works on device (pinch),
+## controllers (trigger) and desktop (mouse) with zero extra actions.
+
+## Grab state for one hand. Tracks pinch-hold with a position history so
+## throw_release_velocity() can recover the release fling.
+## Returns {"active": bool, "grab_point": Vector3, "held_time": float}.
+## `node` must be a Node3D in the tree (state is kept in its metadata).
+static func grab_state(node: Node3D, hand: int = HAND_RIGHT) -> Dictionary:
+	var res := {"active": false, "grab_point": Vector3.ZERO, "held_time": 0.0}
+	if node == null or not node.is_inside_tree():
+		return res
+	var key := "__grab_%d" % hand
+	var st: Dictionary = node.get_meta(key) if node.has_meta(key) else {}
+	var pinching: bool = pinch_active(node, hand)
+	var pos := pointer_position(node, hand)
+	var now_msec := Time.get_ticks_msec() / 1000.0
+	if pinching:
+		if not bool(st.get("active", false)):
+			st = {"active": true, "start": pos, "start_t": now_msec,
+				"hist": [[now_msec, pos]]}
+		else:
+			var hist: Array = st.get("hist", [])
+			hist.append([now_msec, pos])
+			while hist.size() > 10:
+				hist.pop_front()
+			st["hist"] = hist
+		res["active"] = true
+		res["grab_point"] = pos
+		res["held_time"] = now_msec - float(st.get("start_t", now_msec))
+		node.set_meta(key, st)
+	else:
+		# Latch the release velocity for one frame so the caller can fling.
+		if bool(st.get("active", false)):
+			var v := _hist_velocity(st.get("hist", []))
+			node.set_meta("__throw_%d" % hand, {"vel": v, "t": now_msec})
+		node.set_meta(key, {})
+	return res
+
+
+## Release velocity of the last grab for a hand (m/s, world space).
+## Valid for ~0.5 s after release, then decays to Vector3.ZERO.
+static func throw_release_velocity(node: Node3D, hand: int = HAND_RIGHT) -> Vector3:
+	if node == null or not node.is_inside_tree():
+		return Vector3.ZERO
+	var key := "__throw_%d" % hand
+	if not node.has_meta(key):
+		return Vector3.ZERO
+	var st: Dictionary = node.get_meta(key)
+	var age := Time.get_ticks_msec() / 1000.0 - float(st.get("t", 0.0))
+	if age > 0.5:
+		node.set_meta(key, {})
+		return Vector3.ZERO
+	return st.get("vel", Vector3.ZERO)
+
+
+## Hand travel speed while grabbing (m/s) - for texture ticks / sculpt audio.
+static func grab_speed(node: Node3D, hand: int = HAND_RIGHT) -> float:
+	if node == null or not node.is_inside_tree():
+		return 0.0
+	var key := "__grab_%d" % hand
+	if not node.has_meta(key):
+		return 0.0
+	var st: Dictionary = node.get_meta(key)
+	if not bool(st.get("active", false)):
+		return 0.0
+	return _hist_velocity(st.get("hist", [])).length()
+
+
+static func _hist_velocity(hist: Array) -> Vector3:
+	if hist.size() < 2:
+		return Vector3.ZERO
+	var t0: float = hist[0][0]
+	var p0: Vector3 = hist[0][1]
+	var t1: float = hist[hist.size() - 1][0]
+	var p1: Vector3 = hist[hist.size() - 1][1]
+	var dt := t1 - t0
+	if dt < 0.016:
+		return Vector3.ZERO
+	return (p1 - p0) / dt

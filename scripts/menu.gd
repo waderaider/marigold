@@ -2,6 +2,8 @@ extends Node3D
 class_name MarigoldMenu
 ## MARIGOLD 2D launch menu: a Control UI rendered on a SubViewport quad
 ## floating ~2m in front of the user, with Dia de Muertos styling.
+## v0.5.0: chapter preview cards with generated key art, Journey/Experiences
+## tabs, and a Continue Journey hero button (resumes saved progress).
 ##
 ## Input (ported from the proven NEXUS ARCADE v0.7.0 launcher):
 ## - Quest controllers: visible marigold-orange laser from each controller,
@@ -18,8 +20,8 @@ signal download_requested
 signal install_requested
 signal time_mode_chosen(mode: String)
 
-const VP_SIZE := Vector2(1280, 1560)
-const QUAD_SIZE := Vector2(1.9, 2.32)
+const VP_SIZE := Vector2(1280, 1700)
+const QUAD_SIZE := Vector2(1.9, 2.53)
 const QUAD_POS := Vector3(0, 1.62, -2.0)
 
 const C_MARIGOLD := Color(1.0, 0.68, 0.18)
@@ -45,6 +47,13 @@ var _install_button: Button
 var _chapter_names: Array = []
 var _experiences: Array = []
 var _time_buttons: Dictionary = {}
+var _journey_page: Control
+var _exp_page: Control
+var _tab_journey: Button
+var _tab_exp: Button
+var _continue_button: Button
+var _progress_idx := 0
+var _completed: Array = []
 
 
 func _ready() -> void:
@@ -79,12 +88,20 @@ func _input(event: InputEvent) -> void:
 
 func set_chapters(chapters: Array) -> void:
 	_chapter_names = chapters
-	_build_chapter_buttons()
+	_build_chapter_cards()
 
 
 func set_experiences(exps: Array) -> void:
 	_experiences = exps
-	_build_experience_buttons()
+	_build_experience_cards()
+
+
+## Journey progress: current chapter index + completed chapter indices.
+func set_progress(idx: int, completed: Array) -> void:
+	_progress_idx = clampi(idx, 0, maxi(0, _chapter_names.size() - 1))
+	_completed = completed.duplicate()
+	_refresh_continue()
+	_build_chapter_cards()
 
 
 func show_menu() -> void:
@@ -200,81 +217,237 @@ func _build_ui() -> void:
 	root.add_child(bg)
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 70)
-	margin.add_theme_constant_override("margin_right", 70)
-	margin.add_theme_constant_override("margin_top", 50)
-	margin.add_theme_constant_override("margin_bottom", 50)
+	margin.add_theme_constant_override("margin_left", 60)
+	margin.add_theme_constant_override("margin_right", 60)
+	margin.add_theme_constant_override("margin_top", 40)
+	margin.add_theme_constant_override("margin_bottom", 40)
 	bg.add_child(margin)
 
 	_menu_panel = VBoxContainer.new()
-	_menu_panel.add_theme_constant_override("separation", 18)
+	_menu_panel.add_theme_constant_override("separation", 14)
 	_menu_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	margin.add_child(_menu_panel)
 
-	_add_label(_menu_panel, "MARIGOLD", 120, C_MARIGOLD)
-	_add_label(_menu_panel, "A Dia de Muertos Journey", 46, C_CREAM)
+	_add_label(_menu_panel, "MARIGOLD", 110, C_MARIGOLD)
+	_add_label(_menu_panel, "A Dia de Muertos Journey", 42, C_CREAM)
 	_add_separator(_menu_panel)
-	_add_label(_menu_panel, "A 10-minute guided journey in 5 chapters.\nSelect a chapter to begin.", 36, Color(0.85, 0.78, 0.88))
+
+	# Tabs: Journey | Experiences.
+	var tabs := HBoxContainer.new()
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs.add_theme_constant_override("separation", 12)
+	_menu_panel.add_child(tabs)
+	_tab_journey = _make_button("Journey", 38)
+	_tab_journey.toggle_mode = true
+	_tab_journey.button_pressed = true
+	_tab_journey.pressed.connect(_show_tab.bind(0))
+	tabs.add_child(_tab_journey)
+	_tab_exp = _make_button("Experiences", 38)
+	_tab_exp.toggle_mode = true
+	_tab_exp.pressed.connect(_show_tab.bind(1))
+	tabs.add_child(_tab_exp)
+
+	_journey_page = VBoxContainer.new()
+	_journey_page.add_theme_constant_override("separation", 10)
+	_menu_panel.add_child(_journey_page)
+	_exp_page = VBoxContainer.new()
+	_exp_page.add_theme_constant_override("separation", 10)
+	_exp_page.visible = false
+	_menu_panel.add_child(_exp_page)
+
+	# Continue Journey hero button (Journey tab).
+	_continue_button = _make_button("Begin Journey", 46)
+	_continue_button.add_theme_color_override("font_color", Color(0.15, 0.06, 0.02))
+	var hero_normal := StyleBoxFlat.new()
+	hero_normal.bg_color = C_MARIGOLD
+	hero_normal.set_corner_radius_all(20)
+	hero_normal.content_margin_left = 24
+	hero_normal.content_margin_right = 24
+	var hero_hover := hero_normal.duplicate() as StyleBoxFlat
+	hero_hover.bg_color = Color(1.0, 0.78, 0.30)
+	_continue_button.add_theme_stylebox_override("normal", hero_normal)
+	_continue_button.add_theme_stylebox_override("hover", hero_hover)
+	_continue_button.add_theme_stylebox_override("pressed", hero_hover)
+	_continue_button.pressed.connect(func() -> void: chapter_chosen.emit(_progress_idx))
+	_journey_page.add_child(_continue_button)
 
 	var chapters_box := VBoxContainer.new()
 	chapters_box.name = "ChaptersBox"
-	chapters_box.add_theme_constant_override("separation", 12)
-	_menu_panel.add_child(chapters_box)
+	chapters_box.add_theme_constant_override("separation", 8)
+	_journey_page.add_child(chapters_box)
 
-	_add_label(_menu_panel, "Experiences", 40, C_PINK)
 	var exp_box := VBoxContainer.new()
 	exp_box.name = "ExperiencesBox"
-	exp_box.add_theme_constant_override("separation", 12)
-	_menu_panel.add_child(exp_box)
+	exp_box.add_theme_constant_override("separation", 8)
+	_exp_page.add_child(exp_box)
 
-	_add_label(_menu_panel, "Sky & Weather", 40, C_MARIGOLD)
+	_add_label(_menu_panel, "Sky & Weather", 38, C_MARIGOLD)
 	var sky_row := HBoxContainer.new()
 	sky_row.name = "SkyRow"
-	sky_row.add_theme_constant_override("separation", 10)
+	sky_row.add_theme_constant_override("separation", 8)
 	sky_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_menu_panel.add_child(sky_row)
 	for m in [["dawn", "Dawn"], ["day", "Day"], ["sunset", "Sunset"], ["night", "Night"], ["auto", "Auto"]]:
-		var tb := _make_button(m[1], 34)
+		var tb := _make_button(m[1], 32)
 		tb.toggle_mode = true
+		tb.custom_minimum_size = Vector2(0, 72)
 		tb.pressed.connect(_on_time_mode.bind(m[0]))
 		sky_row.add_child(tb)
 		_time_buttons[m[0]] = tb
 	set_time_mode("sunset") # default: golden sunset, the iconic mood
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 16)
+	row.add_theme_constant_override("separation", 14)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_menu_panel.add_child(row)
 
-	var begin := _make_button("Begin Journey", 44)
-	begin.pressed.connect(func() -> void: chapter_chosen.emit(0))
-	row.add_child(begin)
-
-	_mode_button = _make_button("Mode: Immersive World", 40)
+	_mode_button = _make_button("Mode: Immersive World", 38)
 	_mode_button.pressed.connect(func() -> void: mode_toggled.emit())
 	row.add_child(_mode_button)
 
 	_add_separator(_menu_panel)
 
-	var upd := _make_button("Check for Updates", 40)
+	var upd := _make_button("Check for Updates", 38)
 	upd.pressed.connect(func() -> void: updates_requested.emit())
 	_menu_panel.add_child(upd)
 
-	_download_button = _make_button("Download", 40)
+	_download_button = _make_button("Download", 38)
 	_download_button.visible = false
 	_download_button.pressed.connect(func() -> void: download_requested.emit())
 	_menu_panel.add_child(_download_button)
 
-	_install_button = _make_button("Install Update", 40)
+	_install_button = _make_button("Install Update", 38)
 	_install_button.visible = false
 	_install_button.pressed.connect(func() -> void: install_requested.emit())
 	_menu_panel.add_child(_install_button)
 
-	_status_label = _add_label(_menu_panel, "", 34, Color(0.8, 0.8, 0.85))
-	_version_label = _add_label(_menu_panel, "", 32, Color(0.6, 0.6, 0.7))
-	_add_label(_menu_panel, "Point the laser and pull the trigger (or pinch) to select", 32, Color(0.7, 0.62, 0.72))
+	_status_label = _add_label(_menu_panel, "", 32, Color(0.8, 0.8, 0.85))
+	_version_label = _add_label(_menu_panel, "", 30, Color(0.6, 0.6, 0.7))
+	_add_label(_menu_panel, "Point the laser and pull the trigger (or pinch) to select", 30, Color(0.7, 0.62, 0.72))
 
 	_build_finale(root)
+
+
+func _show_tab(idx: int) -> void:
+	_journey_page.visible = idx == 0
+	_exp_page.visible = idx == 1
+	_tab_journey.button_pressed = idx == 0
+	_tab_exp.button_pressed = idx == 1
+
+
+func _refresh_continue() -> void:
+	if _chapter_names.is_empty():
+		_continue_button.text = "Begin Journey"
+		return
+	if _progress_idx <= 0 and _completed.is_empty():
+		_continue_button.text = "Begin Journey"
+	else:
+		var nm := String((_chapter_names[_progress_idx] as Dictionary).get("name", "Journey"))
+		_continue_button.text = "Continue Journey: " + nm
+
+
+## ---- preview cards ----
+
+func _keyart(path: String) -> Texture2D:
+	if path == "" or not ResourceLoader.exists(path):
+		return null
+	return load(path) as Texture2D
+
+
+func _make_card(title: String, desc: String, keyart_path: String, done: bool) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, 148)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = C_PLUM_LIGHT
+	normal.border_color = C_MARIGOLD if not done else Color(0.5, 1.0, 0.5)
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(16)
+	normal.content_margin_left = 12
+	normal.content_margin_right = 16
+	normal.content_margin_top = 8
+	normal.content_margin_bottom = 8
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(0.42, 0.16, 0.30, 0.98)
+	hover.border_color = C_PINK
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = C_MARIGOLD
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 18)
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(hb)
+
+	var tex := _keyart(keyart_path)
+	if tex != null:
+		var tr := TextureRect.new()
+		tr.texture = tex
+		tr.custom_minimum_size = Vector2(216, 135)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hb.add_child(tr)
+
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(vb)
+	var mark := "✓ " if done else ""
+	var tl := Label.new()
+	tl.text = mark + title
+	tl.add_theme_font_size_override("font_size", 40)
+	tl.add_theme_color_override("font_color", C_CREAM)
+	tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(tl)
+	var dl := Label.new()
+	dl.text = desc
+	dl.add_theme_font_size_override("font_size", 30)
+	dl.add_theme_color_override("font_color", Color(0.85, 0.78, 0.88))
+	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(dl)
+	return b
+
+
+func _build_chapter_cards() -> void:
+	_refresh_continue()
+	var box := _journey_page.get_node_or_null("ChaptersBox") as VBoxContainer
+	if box == null:
+		return
+	for c in box.get_children():
+		c.queue_free()
+	for i in range(_chapter_names.size()):
+		var info: Dictionary = _chapter_names[i]
+		var card := _make_card(
+			"%d. %s" % [i + 1, String(info.get("name", "Chapter"))],
+			String(info.get("desc", "")),
+			String(info.get("keyart", "")),
+			_completed.has(i))
+		var idx := i
+		card.pressed.connect(func() -> void: chapter_chosen.emit(idx))
+		box.add_child(card)
+
+
+func _build_experience_cards() -> void:
+	var box := _exp_page.get_node_or_null("ExperiencesBox") as VBoxContainer
+	if box == null:
+		return
+	for c in box.get_children():
+		c.queue_free()
+	for exp in _experiences:
+		var info: Dictionary = exp
+		var card := _make_card(
+			String(info.get("name", "Experience")),
+			String(info.get("desc", "")),
+			String(info.get("keyart", "")),
+			false)
+		var key := String(info.get("key", ""))
+		card.pressed.connect(func() -> void: experience_chosen.emit(key))
+		box.add_child(card)
 
 
 func _build_finale(root: Control) -> void:
@@ -292,34 +465,6 @@ func _build_finale(root: Control) -> void:
 	var again := _make_button("Journey Again", 48)
 	again.pressed.connect(func() -> void: chapter_chosen.emit(0))
 	box.add_child(again)
-
-
-func _build_chapter_buttons() -> void:
-	var box := _menu_panel.get_node_or_null("ChaptersBox") as VBoxContainer
-	if box == null:
-		return
-	for c in box.get_children():
-		c.queue_free()
-	for i in range(_chapter_names.size()):
-		var info: Dictionary = _chapter_names[i]
-		var b := _make_button("%d. %s" % [i + 1, String(info.get("name", "Chapter"))], 44)
-		var idx := i
-		b.pressed.connect(func() -> void: chapter_chosen.emit(idx))
-		box.add_child(b)
-
-
-func _build_experience_buttons() -> void:
-	var box := _menu_panel.get_node_or_null("ExperiencesBox") as VBoxContainer
-	if box == null:
-		return
-	for c in box.get_children():
-		c.queue_free()
-	for exp in _experiences:
-		var info: Dictionary = exp
-		var b := _make_button(String(info.get("name", "Experience")), 44)
-		var key := String(info.get("key", ""))
-		b.pressed.connect(func() -> void: experience_chosen.emit(key))
-		box.add_child(b)
 
 
 ## ---- widget helpers ----

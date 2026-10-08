@@ -1,0 +1,522 @@
+## MarigoldPause.gd - shared pause/exit overlay (autoload, v0.5.0).
+## SHIP-BLOCKER: every chapter + experience gets pause/exit through:
+##   1. the controller menu button (OpenXR "menu_button" action / Esc),
+##   2. a small floating on-screen exit button (opens the overlay, never
+##      quits directly).
+## The overlay offers Resume, Restart Chapter, Controls (per-chapter button
+## legend), and Quit to Menu. Input works with controller laser, hand pinch,
+## gaze dwell (1.2 s fallback when no XR pointer is live), and desktop mouse.
+## Pause freezes gameplay via get_tree().paused; this node runs
+## PROCESS_MODE_ALWAYS so the overlay stays alive. Ambience audio is ducked.
+## Chapters need ZERO changes: main.gd calls attach()/detach().
+extends Node3D
+
+const EXIT_VP := Vector2i(160, 160)
+const EXIT_SIZE := Vector2(0.17, 0.17)
+const PANEL_VP := Vector2(680, 780)
+const PANEL_SIZE := Vector2(1.0, 1.15)
+const DWELL_TIME := 1.2
+
+const C_MARIGOLD := Color(1.0, 0.68, 0.18)
+const C_CREAM := Color(1.0, 0.93, 0.82)
+const C_PLUM := Color(0.16, 0.05, 0.14, 0.96)
+const C_PLUM_LIGHT := Color(0.28, 0.10, 0.22, 0.96)
+const C_PINK := Color(1.0, 0.35, 0.55)
+
+var _attached := false
+var _pause_open := false
+var _restart_cb := Callable()
+var _quit_cb := Callable()
+var _legend_key := ""
+var _menu_was_pressed := false
+var _cooldown := 0.0
+
+var _xr_origin: Node3D = null
+var _controllers: Array[XRController3D] = []
+
+var _exit_root: Node3D
+var _exit_viewport: SubViewport
+var _exit_quad: MeshInstance3D
+var _exit_pointers: Array[XRUIPointer] = []
+
+var _panel_root: Node3D
+var _panel_viewport: SubViewport
+var _panel_quad: MeshInstance3D
+var _panel_pointers: Array[XRUIPointer] = []
+var _panel_stack: Control # main page
+var _legend_page: Control # controls legend page
+var _legend_lines: Label
+
+var _dwell_t := 0.0
+var _dwell_pos := Vector2.ZERO
+var _dwell_ring: MeshInstance3D
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_build_exit_button()
+	_build_panel()
+	_panel_root.visible = false
+	_exit_root.visible = false
+
+
+func _process(delta: float) -> void:
+	if _cooldown > 0.0:
+		_cooldown -= delta
+	var xr := false
+	var vp := get_viewport()
+	if vp != null:
+		xr = vp.use_xr
+	for p in _exit_pointers + _panel_pointers:
+		if is_instance_valid(p):
+			p.xr_mode = xr
+	_update_menu_button()
+	if not _attached:
+		return
+	if _pause_open:
+		_update_gaze(delta, _panel_viewport, _panel_quad)
+	else:
+		_update_exit_follow()
+		_update_gaze(delta, _exit_viewport, _exit_quad)
+
+
+func _input(event: InputEvent) -> void:
+	# Desktop: Esc toggles pause.
+	if event.is_action_pressed("ui_cancel"):
+		if _attached and _cooldown <= 0.0:
+			_cooldown = 0.4
+			_toggle_pause()
+		return
+	if not _attached:
+		return
+	# Desktop mouse fallback into whichever UI is visible (XR pointers quiet).
+	if _any_pointer_live():
+		return
+	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		var cam := get_viewport().get_camera_3d()
+		if cam == null:
+			return
+		if _pause_open and _panel_quad != null:
+			_forward_mouse(event as InputEventMouse, cam, _panel_quad, _panel_viewport, PANEL_VP)
+		elif not _pause_open and _exit_quad != null and _exit_root.visible:
+			_forward_mouse(event as InputEventMouse, cam, _exit_quad, _exit_viewport, Vector2(EXIT_VP))
+
+
+## ---- public API (called by main.gd) ----
+
+func attach(restart: Callable, quit: Callable, legend_key: String = "") -> void:
+	_restart_cb = restart
+	_quit_cb = quit
+	_legend_key = legend_key
+	_attached = true
+	_pause_open = false
+	_panel_root.visible = false
+	_exit_root.visible = true
+	# The main scene exists now (autoloads ready before it): wire controllers.
+	_ensure_origin()
+	_add_controller_pointers(_exit_pointers, _exit_viewport, _exit_quad)
+	_add_controller_pointers(_panel_pointers, _panel_viewport, _panel_quad)
+
+
+func detach() -> void:
+	_attached = false
+	if _pause_open:
+		_resume()
+	_exit_root.visible = false
+	_panel_root.visible = false
+
+
+func is_pause_open() -> bool:
+	return _pause_open
+
+
+## ---- pause state ----
+
+func _toggle_pause() -> void:
+	if _pause_open:
+		_resume()
+	else:
+		_open()
+
+
+func _open() -> void:
+	if not _attached or _pause_open:
+		return
+	_pause_open = true
+	get_tree().paused = true
+	_duck_audio(true)
+	_exit_root.visible = false
+	_place_panel()
+	_panel_root.visible = true
+	_show_main_page()
+	_dwell_t = 0.0
+	MarigoldHaptics.confirm()
+
+
+func _resume() -> void:
+	if not _pause_open:
+		return
+	_pause_open = false
+	get_tree().paused = false
+	_duck_audio(false)
+	_panel_root.visible = false
+	if _attached:
+		_exit_root.visible = true
+	MarigoldHaptics.confirm()
+
+
+func _on_restart() -> void:
+	_resume()
+	if _restart_cb.is_valid():
+		_restart_cb.call()
+
+
+func _on_quit() -> void:
+	_resume()
+	if _quit_cb.is_valid():
+		_quit_cb.call()
+
+
+func _duck_audio(on: bool) -> void:
+	var st := get_tree().root.get_node_or_null("MarigoldState")
+	if st == null:
+		return
+	var m = st.get("music")
+	if m != null and m.has_method("set_ducked"):
+		m.call("set_ducked", on)
+
+
+## Controller menu button (OpenXR "menu_button" action) with edge detection.
+func _update_menu_button() -> void:
+	if not _attached:
+		_menu_was_pressed = false
+		return
+	var pressed := false
+	if InputMap.has_action("menu_button") and Input.is_action_pressed("menu_button"):
+		pressed = true
+	if not pressed:
+		_ensure_origin()
+		for ctl in _controllers:
+			if is_instance_valid(ctl) and ctl.is_button_pressed("menu_button"):
+				pressed = true
+				break
+	if pressed and not _menu_was_pressed and _cooldown <= 0.0:
+		_cooldown = 0.4
+		_toggle_pause()
+	_menu_was_pressed = pressed
+
+
+func _ensure_origin() -> void:
+	if _xr_origin != null and is_instance_valid(_xr_origin):
+		return
+	_xr_origin = get_tree().root.get_node_or_null("Main/XROrigin3D") as Node3D
+	_controllers.clear()
+	if _xr_origin != null:
+		for side in ["LeftController", "RightController"]:
+			var ctl := _xr_origin.get_node_or_null(side) as XRController3D
+			if ctl != null:
+				_controllers.append(ctl)
+
+
+## Add one controller laser pointer per tracked controller (idempotent).
+func _add_controller_pointers(arr: Array[XRUIPointer], viewport: SubViewport,
+		quad: MeshInstance3D) -> void:
+	for ctl in _controllers:
+		var has := false
+		for p in arr:
+			if is_instance_valid(p) and p.controller == ctl:
+				has = true
+				break
+		if has:
+			continue
+		var p := XRUIPointer.new()
+		p.controller = ctl
+		p.setup(viewport, quad, _xr_origin)
+		add_child(p)
+		arr.append(p)
+
+
+## ---- exit button (floating, opens pause - never quits directly) ----
+
+func _build_exit_button() -> void:
+	_exit_root = Node3D.new()
+	_exit_root.name = "ExitButton"
+	add_child(_exit_root)
+
+	_exit_viewport = SubViewport.new()
+	_exit_viewport.size = EXIT_VP
+	_exit_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_exit_viewport.transparent_bg = true
+	_exit_root.add_child(_exit_viewport)
+
+	var holder := CenterContainer.new()
+	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_exit_viewport.add_child(holder)
+	var b := Button.new()
+	b.text = "II"
+	b.custom_minimum_size = Vector2(132, 132)
+	b.add_theme_font_size_override("font_size", 72)
+	b.add_theme_color_override("font_color", C_MARIGOLD)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.16, 0.05, 0.14, 0.78)
+	sb.border_color = C_MARIGOLD
+	sb.set_border_width_all(4)
+	sb.set_corner_radius_all(66)
+	b.add_theme_stylebox_override("normal", sb)
+	var hov := sb.duplicate() as StyleBoxFlat
+	hov.bg_color = Color(0.42, 0.16, 0.30, 0.9)
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", hov)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.pressed.connect(_open)
+	holder.add_child(b)
+
+	_exit_quad = _make_quad(_exit_root, EXIT_SIZE, _exit_viewport)
+	_make_pointers(_exit_pointers, _exit_viewport, _exit_quad)
+
+
+func _update_exit_follow() -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var basis := cam.global_transform.basis
+	var pos: Vector3 = cam.global_position + basis * Vector3(-0.52, -0.36, -1.15)
+	_exit_root.global_position = pos
+	# Face the camera.
+	var look := cam.global_position - pos
+	if look.length_squared() > 0.0001:
+		_exit_root.rotation.y = atan2(-look.x, -look.z)
+		_exit_root.rotation.x = 0.0
+
+
+## ---- pause panel ----
+
+func _build_panel() -> void:
+	_panel_root = Node3D.new()
+	_panel_root.name = "PausePanel"
+	add_child(_panel_root)
+
+	_panel_viewport = SubViewport.new()
+	_panel_viewport.size = Vector2i(int(PANEL_VP.x), int(PANEL_VP.y))
+	_panel_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_panel_viewport.transparent_bg = true
+	_panel_root.add_child(_panel_viewport)
+
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_panel_viewport.add_child(root)
+
+	var bg := PanelContainer.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = C_PLUM
+	bg_style.border_color = C_MARIGOLD
+	bg_style.set_border_width_all(5)
+	bg_style.set_corner_radius_all(24)
+	bg.add_theme_stylebox_override("panel", bg_style)
+	root.add_child(bg)
+
+	var margin := MarginContainer.new()
+	for side in ["margin_left", "margin_right"]:
+		margin.add_theme_constant_override(side, 56)
+	margin.add_theme_constant_override("margin_top", 44)
+	margin.add_theme_constant_override("margin_bottom", 44)
+	bg.add_child(margin)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 16)
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	margin.add_child(vb)
+
+	var title := Label.new()
+	title.text = "Pausa"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 84)
+	title.add_theme_color_override("font_color", C_MARIGOLD)
+	vb.add_child(title)
+
+	_panel_stack = VBoxContainer.new()
+	_panel_stack.add_theme_constant_override("separation", 14)
+	vb.add_child(_panel_stack)
+	_add_panel_button(_panel_stack, "Continuar  (Resume)", _resume)
+	_add_panel_button(_panel_stack, "Reiniciar  (Restart)", _on_restart)
+	_add_panel_button(_panel_stack, "Controles  (Controls)", _show_legend_page)
+	_add_panel_button(_panel_stack, "Salir al menu  (Quit)", _on_quit)
+
+	_legend_page = VBoxContainer.new()
+	_legend_page.add_theme_constant_override("separation", 14)
+	_legend_page.visible = false
+	vb.add_child(_legend_page)
+	_legend_lines = Label.new()
+	_legend_lines.add_theme_font_size_override("font_size", 34)
+	_legend_lines.add_theme_color_override("font_color", C_CREAM)
+	_legend_lines.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_legend_page.add_child(_legend_lines)
+	_add_panel_button(_legend_page, "Atras  (Back)", _show_main_page)
+
+	_panel_quad = _make_quad(_panel_root, PANEL_SIZE, _panel_viewport)
+	_make_pointers(_panel_pointers, _panel_viewport, _panel_quad)
+
+	# Gaze dwell ring (shown while dwelling).
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.018
+	ring.outer_radius = 0.026
+	ring.rings = 24
+	ring.ring_segments = 8
+	_dwell_ring = MeshInstance3D.new()
+	_dwell_ring.mesh = ring
+	_dwell_ring.material_override = MarigoldFX.glow(Color(1.0, 0.85, 0.4), 2.5)
+	_dwell_ring.visible = false
+	_panel_root.add_child(_dwell_ring)
+
+
+func _add_panel_button(parent: Control, text: String, cb: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_size_override("font_size", 44)
+	b.add_theme_color_override("font_color", Color(1, 1, 1))
+	b.custom_minimum_size = Vector2(0, 96)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = C_PLUM_LIGHT
+	normal.border_color = C_MARIGOLD
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(16)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(0.42, 0.16, 0.30, 0.98)
+	hover.border_color = C_PINK
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
+
+
+func _show_main_page() -> void:
+	_panel_stack.visible = true
+	_legend_page.visible = false
+
+
+func _show_legend_page() -> void:
+	_panel_stack.visible = false
+	_legend_page.visible = true
+	_legend_lines.text = MarigoldControllerSkins.legend_text(_legend_key)
+
+
+func _place_panel() -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		_panel_root.position = Vector3(0, 1.5, -1.8)
+		_panel_root.rotation = Vector3.ZERO
+		return
+	var fwd := -cam.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 0.001 else Vector3(0, 0, -1)
+	_panel_root.global_position = cam.global_position + fwd * 1.7 + Vector3(0, -0.1, 0)
+	_panel_root.rotation.y = atan2(-fwd.x, -fwd.z)
+	_panel_root.rotation.x = 0.0
+
+
+## ---- shared quad + pointer rig ----
+
+func _make_quad(parent: Node3D, size: Vector2, viewport: SubViewport) -> MeshInstance3D:
+	var qm := QuadMesh.new()
+	qm.size = size
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var vpt := ViewportTexture.new()
+	vpt.viewport_path = viewport.get_path()
+	mat.albedo_texture = vpt
+	var quad := MeshInstance3D.new()
+	quad.mesh = qm
+	quad.material_override = mat
+	parent.add_child(quad)
+	return quad
+
+
+func _make_pointers(arr: Array[XRUIPointer], viewport: SubViewport, quad: MeshInstance3D) -> void:
+	# Hand pointers discover their XRHandTracker lazily; controller pointers
+	# are added in attach() once the main scene (and its controllers) exist.
+	for side in [XRPositionalTracker.TRACKER_HAND_LEFT, XRPositionalTracker.TRACKER_HAND_RIGHT]:
+		var hp := XRUIPointer.new()
+		hp.hand_side = side
+		hp.setup(viewport, quad, _xr_origin)
+		add_child(hp)
+		arr.append(hp)
+
+
+func _any_pointer_live() -> bool:
+	if not get_viewport().use_xr:
+		return false
+	for p in _exit_pointers + _panel_pointers:
+		if is_instance_valid(p) and p.is_source_live():
+			return true
+	return false
+
+
+## Gaze dwell fallback: when no XR pointer is live, a 1.2 s look = click.
+func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> void:
+	if _any_pointer_live():
+		_dwell_t = 0.0
+		_dwell_ring.visible = false
+		return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null or quad == null:
+		return
+	var origin := cam.global_position
+	var dir := -cam.global_transform.basis.z
+	var hit := XRUIPointer.ray_to_viewport(origin, dir.normalized(), quad,
+		Vector2(viewport.size))
+	if not bool(hit["hit"]):
+		_dwell_t = 0.0
+		_dwell_ring.visible = false
+		return
+	var pos: Vector2 = hit["pos"]
+	# Forward hover so buttons highlight.
+	var mv := InputEventMouseMotion.new()
+	mv.position = pos
+	viewport.push_input(mv)
+	if _dwell_t <= 0.0 or _dwell_pos.distance_to(pos) > 28.0:
+		_dwell_pos = pos
+		_dwell_t = 0.0001
+	_dwell_t += delta
+	# Dwell ring on the quad at the gaze point.
+	var world: Vector3 = hit["world"]
+	_dwell_ring.global_position = world + quad.global_transform.basis.z * 0.005
+	var k := clampf(_dwell_t / DWELL_TIME, 0.05, 1.0)
+	_dwell_ring.scale = Vector3.ONE * (0.4 + k * 1.6)
+	_dwell_ring.visible = true
+	if _dwell_t >= DWELL_TIME:
+		_dwell_t = 0.0
+		_dwell_ring.visible = false
+		_push_click(viewport, pos)
+		MarigoldHaptics.confirm()
+
+
+func _push_click(viewport: SubViewport, pos: Vector2) -> void:
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = pos
+	viewport.push_input(press)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = pos
+	viewport.push_input(release)
+
+
+func _forward_mouse(event: InputEventMouse, cam: Camera3D, quad: MeshInstance3D,
+		viewport: SubViewport, vp_size: Vector2) -> void:
+	var hit := XRUIPointer.ray_to_viewport(
+		cam.project_ray_origin(event.position),
+		cam.project_ray_normal(event.position),
+		quad, vp_size)
+	if not bool(hit["hit"]):
+		return
+	var ev2 := event.duplicate() as InputEventMouse
+	ev2.position = hit["pos"]
+	viewport.push_input(ev2)

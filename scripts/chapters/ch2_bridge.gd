@@ -48,6 +48,7 @@ var _fireflies: Array[GPUParticles3D] = []
 var _shocks: Array[Dictionary] = []
 var _toast_label: Label3D
 var _toast_time := 0.0
+var _water: MeshInstance3D # luminous water: rain ripples answer the weather (v0.5.0)
 # Wind + physics integration (v0.4.0).
 var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
 
@@ -110,6 +111,10 @@ func _process(delta: float) -> void:
 		_lanterns[i].rotation.x = cos(_t * 0.6 + _lantern_phase[i]) * 0.05 * gust - wvec.z * 0.35
 		MarigoldFX.pulse_glow(_lantern_mats[i], 1.6, 0.45 * (0.6 + wind * 3.2), _t + _lantern_phase[i], 1.8)
 	_update_sway_wind()
+	# Weather answers gameplay (v0.5.0): rain drums expanding ripple rings
+	# across the luminous water.
+	if _water != null and is_instance_valid(_water) and MarigoldSky.instance != null:
+		MarigoldFX.set_water_rain(_water, MarigoldSky.instance.get_rain_amount())
 	# Blossoms bobbing on the water.
 	for i in _blossoms.size():
 		var b := _blossoms[i]
@@ -241,6 +246,10 @@ func _build() -> void:
 	# Luminous water under everything.
 	var water := MarigoldFX.make_luminous_water(self, 44.0)
 	water.position.y = -0.5
+	_water = water
+	# Ambient life (v0.5.0): butterflies over the water, spirits on the horizon.
+	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -4), 8, 5.0)
+	MarigoldAmbient.add_spirits(self, 5, 16.0)
 
 	_bridge = Node3D.new()
 	_bridge.name = "Bridge"

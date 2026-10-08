@@ -246,6 +246,19 @@ func get_wind_strength() -> float:
 	return clampf(_wind_speed, 0.0, 1.0)
 
 
+## Weather numeric params for gameplay hooks (v0.5.0).
+## dim: 1.0 = full brightness, lower = darker (storm 0.42). Use to dim
+## chapter lighting when storms roll in.
+func get_dim() -> float:
+	return _cur[P_DIM]
+
+
+## Current rain amount 0..1 (rain 0.70, storm 1.0). Drives rain ripples on
+## water surfaces.
+func get_rain_amount() -> float:
+	return _cur[P_RAIN]
+
+
 # ---- Wet-look registration ----
 
 func register_ground_material(mat: Material) -> void:

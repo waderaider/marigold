@@ -5,12 +5,17 @@ extends RefCounted
 class_name MarigoldModels
 
 const BASE := "res://assets/models/kenney/"
+const BLENDER_BASE := "res://assets/models/blender/"
 
 ## Pack subdirectories.
 const GRAVEYARD := "graveyard/"
 const NATURE := "nature/"
 const FANTASY := "fantasy/"
 const FURNITURE := "furniture/"
+## In-house Blender originals (no license encumbrance).
+const ALEBRIJES := "alebrijes/"
+const GUITAR := "guitar/"
+const OFRENDA := "ofrenda/"
 
 static var _cache := {}
 
@@ -33,6 +38,94 @@ static func instance(pack: String, model_name: String) -> Node3D:
 		return null
 	_cache[path] = ps
 	return ps.instantiate() as Node3D
+
+
+## Load an in-house Blender GLB (e.g. alebrijes). Same cache contract.
+static func blender_model(subdir: String, model_name: String) -> Node3D:
+	var path := BLENDER_BASE + subdir + model_name + ".glb"
+	if _cache.has(path):
+		var cached: PackedScene = _cache[path]
+		if cached != null and is_instance_valid(cached):
+			return cached.instantiate() as Node3D
+		_cache.erase(path)
+	if not ResourceLoader.exists(path):
+		push_warning("[MarigoldModels] missing blender model: " + path)
+		return null
+	var ps := load(path) as PackedScene
+	if ps == null:
+		push_warning("[MarigoldModels] failed to load: " + path)
+		return null
+	_cache[path] = ps
+	return ps.instantiate() as Node3D
+
+
+## Find a descendant node by name fragment (case-insensitive). Used to map
+## Blender part names (wings, head, tail...) to animation slots.
+static func find_part(root: Node, fragment: String) -> Node3D:
+	var frag := fragment.to_lower()
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is Node3D and String(n.name).to_lower().contains(frag):
+			return n as Node3D
+		for c in n.get_children():
+			stack.append(c)
+	return null
+
+
+## Enable vertex-color albedo (+ optional emissive) on every mesh material
+## under root. For in-house vertex-colored GLBs. Duplicates shared materials
+## so per-guide glow pulsing stays independent.
+static func enable_vertex_colors(root: Node, emission: Color = Color(0, 0, 0),
+		emission_energy: float = 0.0) -> Array:
+	var mats: Array = []
+	var dup_cache := {}
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n := stack.pop_back() as Node
+		if n is MeshInstance3D:
+			var mi := n as MeshInstance3D
+			var src: Material = mi.get_active_material(0)
+			if src is StandardMaterial3D:
+				if not dup_cache.has(src):
+					var dup := (src as StandardMaterial3D).duplicate() as StandardMaterial3D
+					dup.vertex_color_use_as_albedo = true
+					if emission_energy > 0.0:
+						dup.emission_enabled = true
+						dup.emission = emission
+						dup.emission_energy_multiplier = emission_energy
+					dup_cache[src] = dup
+					mats.append(dup)
+				mi.material_override = dup_cache[src]
+		for c in n.get_children():
+			stack.append(c)
+	return mats
+
+
+## Model-space AABB of every mesh under a root (for scale normalization).
+static func bounds_of(model: Node) -> AABB:
+	var bounds := AABB()
+	var first := true
+	var stack: Array = [[model, Transform3D.IDENTITY]]
+	while not stack.is_empty():
+		var item: Array = stack.pop_back()
+		var n: Node = item[0]
+		var t: Transform3D = item[1]
+		var lt := t
+		if n is Node3D:
+			lt = t * (n as Node3D).transform
+		if n is MeshInstance3D:
+			var mesh := (n as MeshInstance3D).mesh
+			if mesh != null:
+				var ma: AABB = lt * mesh.get_aabb()
+				if first:
+					bounds = ma
+					first = false
+				else:
+					bounds = bounds.merge(ma)
+		for c in n.get_children():
+			stack.append([c, lt])
+	return bounds
 
 
 ## Place a model under a parent with transform. Returns the instance (or null).

@@ -70,6 +70,9 @@ func _ready() -> void:
 	_build_path()
 	_build_ui()
 	MarigoldFX.spawn_ambient_motes(self, Vector3(0, 1.6, -5), 6.0, 80)
+	# Ambient life pass (v0.5.0): butterflies + horizon spirits like ch1/ch2.
+	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -5), 8, 6.0)
+	MarigoldAmbient.add_spirits(self, 5, 16.0)
 	# Drifting petals riding a gentle breeze down the corridor (looping).
 	var drift := GPUParticles3D.new()
 	drift.amount = 70
