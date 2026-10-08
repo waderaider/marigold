@@ -144,13 +144,13 @@ func _build_menu() -> void:
 			"keyart": "res://assets/keyart/espejo.png"},
 		{"key": "pinta", "name": "Pinta Alebrijes",
 			"desc": "Paint your own spirit animal - it comes alive",
-			"keyart": "res://assets/keyart/guitarra.png"},
+			"keyart": "res://assets/keyart/pinta.png"},
 		{"key": "galeria", "name": "Galeria de Recuerdos",
 			"desc": "Your festival moments, framed in papel picado",
-			"keyart": "res://assets/keyart/ch1_ofrenda.png"},
+			"keyart": "res://assets/keyart/galeria.png"},
 		{"key": "ofrenda_finale", "name": "Tu Ofrenda",
 			"desc": "Your altar of memories - the candle-lit reveal",
-			"keyart": "res://assets/keyart/ch1_ofrenda.png"},
+			"keyart": "res://assets/keyart/ofrenda_finale.png"},
 	])
 	var prog := _load_progress()
 	_menu.set_progress(int(prog.get("current", 0)), prog.get("completed", []))
@@ -184,11 +184,14 @@ func _on_menu_experience(key: String) -> void:
 	_load_experience(key)
 
 
-func _load_experience(key: String) -> void:
+func _load_experience(key: String, via: String = "menu") -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
 	var info: Dictionary = EXPERIENCES[key]
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_start(String(info["name"]), key, via)
 	var scene: PackedScene = load(info["scene"])
 	_current_chapter = scene.instantiate()
 	_chapter_root.add_child(_current_chapter)
@@ -204,6 +207,9 @@ func _load_experience(key: String) -> void:
 
 func _on_experience_complete() -> void:
 	# Experiences return to the menu instead of advancing the journey.
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("completed")
 	await get_tree().create_timer(0.8).timeout
 	_quit_to_menu()
 
@@ -218,13 +224,19 @@ func _wire_pause_and_skins(key: String, display_name: String) -> void:
 
 
 func _restart_current() -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("restart")
 	if _current_kind == "exp" and _current_exp_key != "":
-		_load_experience(_current_exp_key)
+		_load_experience(_current_exp_key, "restart")
 	elif _current_kind == "chapter":
-		_load_chapter(_chapter_index)
+		_load_chapter(_chapter_index, "restart")
 
 
 func _quit_to_menu() -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("quit_to_menu")
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
@@ -300,17 +312,20 @@ func _petal_transition() -> void:
 	await get_tree().create_timer(1.1).timeout
 
 
-func _load_chapter(idx: int) -> void:
+func _load_chapter(idx: int, via: String = "menu") -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
 	if idx < 0 or idx >= CHAPTERS.size():
 		_show_finale_card()
 		return
+	var info: Dictionary = CHAPTERS[idx]
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_start(String(info["name"]), String(info["key"]), via)
 	_chapter_index = idx
 	MarigoldState.chapter_index = idx
 	_save_progress(idx)
-	var info: Dictionary = CHAPTERS[idx]
 	var scene: PackedScene = load(info["scene"])
 	_current_chapter = scene.instantiate()
 	_chapter_root.add_child(_current_chapter)
@@ -327,6 +342,9 @@ func _load_chapter(idx: int) -> void:
 func _on_chapter_complete() -> void:
 	# Mark the finished chapter, then the scripted flight over the candle-lit
 	# town (v0.6.0: replaces the petal-fall fade-to-black between chapters).
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("completed")
 	_mark_completed(_chapter_index)
 	var next_idx := _chapter_index + 1
 	if next_idx < 0 or next_idx >= CHAPTERS.size():
@@ -345,7 +363,7 @@ func _on_flight_done(next_idx: int) -> void:
 	for c in get_children():
 		if c is MarigoldFlight:
 			c.queue_free()
-	_load_chapter(next_idx)
+	_load_chapter(next_idx, "complete")
 
 
 ## ---- Journey progress (Continue Journey, v0.5.0) ----

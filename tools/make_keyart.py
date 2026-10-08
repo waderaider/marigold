@@ -225,6 +225,104 @@ def motif_espejo(d):
     d.line([(120, 60), (392, 60)], fill=(255, 255, 255, 60), width=10)  # sheen
 
 
+def motif_pinta(d):
+    # Pinta Alebrijes: a paintbrush mid-stroke bringing a small spirit animal
+    # to life, paint blobs scattered in folk colors.
+    # Paint blobs.
+    for bx, by, r, c in [(80, 90, 16, PINK), (430, 80, 13, TEAL),
+                         (60, 200, 12, (150, 110, 255)), (452, 220, 15, PINK),
+                         (150, 70, 10, MARIGOLD)]:
+        d.ellipse([bx - r, by - r, bx + r, by + r], fill=c)
+        d.ellipse([bx - r // 2, by - r // 2, bx + r // 2, by + r // 2],
+                  fill=(255, 255, 255, 90))
+    # Spirit animal: small moth-jaguar taking shape (right of center).
+    bx, by = 350, 165
+    for wx, wy, c in [(-45, -45, TEAL), (45, -45, (150, 110, 255))]:  # wings
+        d.polygon([(bx + wx, by + wy), (bx + wx - 45, by + wy - 55),
+                   (bx + wx + 45, by + wy - 55)], fill=c)
+    d.ellipse([bx - 55, by - 25, bx + 55, by + 35], fill=PINK)       # body
+    d.ellipse([bx + 30, by - 55, bx + 95, by + 5], fill=PINK)       # head
+    d.polygon([(bx + 55, by - 50), (bx + 45, by - 95), (bx + 75, by - 55)],
+              fill=MARIGOLD)                                         # horn
+    d.ellipse([bx + 55, by - 32, bx + 68, by - 18], fill=(20, 8, 16))  # eye
+    d.ellipse([bx + 58, by - 30, bx + 63, by - 24], fill=MARIGOLD)
+    for i in range(4):                                             # spots
+        sx = bx - 35 + (i % 2) * 40
+        sy = by - 8 + (i // 2) * 22
+        d.ellipse([sx - 8, sy - 8, sx + 8, sy + 8], fill=TEAL)
+    glow_dot(d, bx - 105, by - 95, 8, MARIGOLD)                    # coming alive
+    # Paintbrush: diagonal, tip touching the animal's wing.
+    tip = (bx - 75, by - 55)
+    tail = (95, 265)
+    d.line([tail, tip], fill=(150, 95, 45), width=15)               # handle
+    d.line([tail, tip], fill=(190, 130, 60), width=6)
+    d.polygon([tip, (tip[0] - 26, tip[1] + 8), (tip[0] - 14, tip[1] + 26)],
+              fill=(200, 200, 205))                                  # ferrule
+    d.polygon([(tip[0] - 26, tip[1] + 8), (tip[0] - 44, tip[1] - 6),
+               (tip[0] - 14, tip[1] + 26)], fill=TEAL)               # bristles
+    for i in range(5):                                             # wet stroke
+        sx = tip[0] - 44 - i * 10
+        sy = tip[1] - 6 + i * 9
+        d.ellipse([sx - 7, sy - 7, sx + 7, sy + 7], fill=TEAL)
+
+
+def motif_galeria(d):
+    # Galeria de Recuerdos: festival photos framed in papel-picado colors,
+    # hung from a string; small marigold dots between frames.
+    d.line([(24, 56), (488, 56)], fill=(120, 80, 40), width=5)       # string
+    cols = [PINK, MARIGOLD, TEAL]
+    for i, (cx, c) in enumerate(zip([112, 256, 400], cols)):
+        d.line([(cx, 56), (cx, 78)], fill=(120, 80, 40), width=4)   # hanger
+        d.rectangle([cx - 62, 78, cx + 62, 208], fill=c)            # frame
+        d.rectangle([cx - 52, 88, cx + 52, 198], fill=(16, 5, 22))  # photo
+        if i == 0:                                                 # marigold sun
+            glow_dot(d, cx, 143, 18, MARIGOLD)
+            d.ellipse([cx - 22, 121, cx + 22, 165], fill=MARIGOLD)
+            d.ellipse([cx - 12, 131, cx + 12, 155], fill=MARIGOLD_DEEP)
+        elif i == 1:                                               # calavera
+            d.ellipse([cx - 20, 118, cx + 20, 158], fill=(240, 225, 195))
+            d.ellipse([cx - 12, 132, cx - 4, 144], fill=(20, 8, 16))
+            d.ellipse([cx + 4, 132, cx + 12, 144], fill=(20, 8, 16))
+            d.rectangle([cx - 15, 156, cx + 15, 190], fill=(240, 225, 195))
+        else:                                                      # alebrije
+            d.ellipse([cx - 30, 130, cx + 30, 170], fill=PINK)
+            d.ellipse([cx + 18, 112, cx + 48, 142], fill=PINK)
+            d.polygon([(cx - 30, 140), (cx - 52, 118), (cx - 44, 148)],
+                      fill=TEAL)
+            d.ellipse([cx + 28, 120, cx + 38, 130], fill=(20, 8, 16))
+    for fx in [184, 328]:
+        marigold_dot(d, fx, 62, 7)
+        marigold_dot(d, fx, 232, 7)
+
+
+def motif_ofrenda_finale(d):
+    # Tu Ofrenda: candle-lit altar tiers under a marigold arch, night sky.
+    for sx, sy in [(70, 70), (150, 48), (370, 60), (450, 90), (40, 130)]:
+        glow_dot(d, sx, sy, 8, CREAM)                                # stars
+    cx, cy, R = 256, 200, 105
+    d.arc([cx - R, cy - R, cx + R, cy + R], 180, 360, fill=(120, 60, 20),
+          width=7)                                                   # arch
+    for a in range(0, 181, 14):
+        x = cx + R * math.cos(math.radians(180 - a))
+        y = cy - R * math.sin(math.radians(180 - a))
+        marigold_dot(d, x, y, 8)
+    for tx, tw, ty in [(256, 260, 208), (256, 190, 172), (256, 120, 136)]:
+        d.rectangle([tx - tw // 2, ty, tx + tw // 2, ty + 36], fill=(40, 16, 34),
+                    outline=CREAM, width=3)                        # tiers
+    # Candles with flames on every tier (halo glow drawn under the body,
+    # small enough that neighboring glows stay separate).
+    candles = [(150, 172), (256, 172), (362, 172), (196, 136), (316, 136),
+               (256, 100)]
+    for fx, fy in candles:
+        glow_dot(d, fx, fy - 16, 8, MARIGOLD)
+        d.rectangle([fx - 7, fy - 10, fx + 7, fy + 36], fill=(240, 225, 195))
+        d.ellipse([fx - 7, fy - 22, fx + 7, fy - 2], fill=(255, 140, 30))
+        d.ellipse([fx - 3.5, fy - 16, fx + 3.5, fy - 6], fill=(255, 240, 180))
+    # Framed photo on the top tier.
+    d.rectangle([232, 140, 280, 168], outline=CREAM, width=3)
+    d.ellipse([247, 148, 265, 162], fill=(255, 200, 120))
+
+
 CARDS = [
     ("ch1_ofrenda", "The Ofrenda", "Build the offering", motif_ofrenda),
     ("ch2_bridge", "The Marigold Bridge", "Cross the glowing bridge", motif_bridge),
@@ -234,6 +332,9 @@ CARDS = [
     ("guitarra", "Guitarra Mexicana", "Rhythm-strum folk guitar", motif_guitarra),
     ("mano_magica", "Mano Magica", "A hand-tracking tour", motif_mano),
     ("espejo", "Gran Baile: Espejo", "Mirror dance, body tracked", motif_espejo),
+    ("pinta", "Pinta Alebrijes", "Paint your spirit animal", motif_pinta),
+    ("galeria", "Galeria de Recuerdos", "Your festival moments, framed", motif_galeria),
+    ("ofrenda_finale", "Tu Ofrenda", "Your altar of memories", motif_ofrenda_finale),
 ]
 
 

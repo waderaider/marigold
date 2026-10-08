@@ -93,6 +93,9 @@ func _input(event: InputEvent) -> void:
 	if _any_pointer_live():
 		return
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
+		if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+			# Real desktop mouse click -> mouse input method.
+			_note_input_method("mouse")
 		var cam := get_viewport().get_camera_3d()
 		if cam == null:
 			return
@@ -151,6 +154,10 @@ func _open() -> void:
 	_show_main_page()
 	_dwell_t = 0.0
 	MarigoldHaptics.confirm()
+	# v0.6.1: gameplay telemetry — pause opens feed "where do players pause".
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.event("pause_open", {"chapter": gt.current_chapter()})
 
 
 func _resume() -> void:
@@ -232,6 +239,7 @@ func _add_controller_pointers(arr: Array[XRUIPointer], viewport: SubViewport,
 		var p := XRUIPointer.new()
 		p.controller = ctl
 		p.setup(viewport, quad, _xr_origin)
+		p.xr_clicked.connect(_on_pointer_clicked.bind(p))
 		add_child(p)
 		arr.append(p)
 
@@ -452,6 +460,7 @@ func _make_pointers(arr: Array[XRUIPointer], viewport: SubViewport, quad: MeshIn
 		var hp := XRUIPointer.new()
 		hp.hand_side = side
 		hp.setup(viewport, quad, _xr_origin)
+		hp.xr_clicked.connect(_on_pointer_clicked.bind(hp))
 		add_child(hp)
 		arr.append(hp)
 
@@ -505,6 +514,9 @@ func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> 
 
 
 func _push_click(viewport: SubViewport, pos: Vector2) -> void:
+	# Only called from _update_gaze: this click came from the gaze dwell
+	# fallback, so it counts as the gaze input method.
+	_note_input_method("gaze")
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
@@ -515,6 +527,32 @@ func _push_click(viewport: SubViewport, pos: Vector2) -> void:
 	release.pressed = false
 	release.position = pos
 	viewport.push_input(release)
+
+
+## v0.6.1: first click in a chapter session records the input method for
+## telemetry (controllers vs hands vs gaze vs mouse). First method wins per
+## session (GameplayTelemetry.note_input_method). Source identification
+## mirrors XRUIPointer: controller pointers carry a live XRController3D,
+## hand pointers carry hand_side != 0.
+func _note_input_from_pointer(p: XRUIPointer) -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt == null:
+		return
+	if p.controller != null:
+		gt.note_input_method("controllers")
+	elif p.hand_side != 0:
+		gt.note_input_method("hands")
+
+
+func _on_pointer_clicked(_viewport_pos: Vector2, p: XRUIPointer) -> void:
+	if is_instance_valid(p):
+		_note_input_from_pointer(p)
+
+
+func _note_input_method(method: String) -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.note_input_method(method)
 
 
 func _forward_mouse(event: InputEventMouse, cam: Camera3D, quad: MeshInstance3D,
