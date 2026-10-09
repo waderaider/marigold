@@ -3,9 +3,13 @@
 ##   1. the controller menu button (OpenXR "menu_button" action / Esc),
 ##   2. a small floating on-screen exit button (opens the overlay, never
 ##      quits directly).
-## The overlay offers Resume, Restart Chapter, Controls (per-chapter button
-## legend), and Quit to Menu. Input works with controller laser, hand pinch,
-## gaze dwell (1.2 s fallback when no XR pointer is live), and desktop mouse.
+## v0.6.2 rework: simplified 2D list — Continuar (Resume, green) / Controles
+## (Controls, blue) / Reiniciar (Restart, orange) / Prev/Next nav row (NEW) /
+## SALIR AL INICIO (EXIT) (red, full-width, bottom, unmissable). The pause
+## title shows the current chapter/experience name so Restart's target is
+## obvious. Belt-and-suspenders input: XRUIPointer primary path + DirectUIInput
+## fallback (own yellow beams), one deduped click funnel; gaze dwell fires
+## only when NO beam is drawn by either path.
 ## Pause freezes gameplay via get_tree().paused; this node runs
 ## PROCESS_MODE_ALWAYS so the overlay stays alive. Ambience audio is ducked.
 ## Chapters need ZERO changes: main.gd calls attach()/detach().
@@ -15,19 +19,28 @@ const EXIT_VP := Vector2i(160, 160)
 const EXIT_SIZE := Vector2(0.17, 0.17)
 const PANEL_VP := Vector2(680, 780)
 const PANEL_SIZE := Vector2(1.0, 1.15)
+const PANEL_DISTANCE := 1.8
 const DWELL_TIME := 1.2
+const CLICK_DEDUPE_MS := 120
+const CLICK_DEDUPE_PX := 8.0
 
 const C_MARIGOLD := Color(1.0, 0.68, 0.18)
 const C_CREAM := Color(1.0, 0.93, 0.82)
 const C_PLUM := Color(0.16, 0.05, 0.14, 0.96)
 const C_PLUM_LIGHT := Color(0.28, 0.10, 0.22, 0.96)
 const C_PINK := Color(1.0, 0.35, 0.55)
+const C_GREEN := Color(0.25, 0.75, 0.35)
+const C_BLUE := Color(0.30, 0.55, 1.0)
+const C_ORANGE := Color(1.0, 0.60, 0.15)
+const C_RED := Color(0.95, 0.20, 0.15)
+const C_STEEL := Color(0.45, 0.55, 0.75)
 
 var _attached := false
 var _pause_open := false
 var _restart_cb := Callable()
 var _quit_cb := Callable()
 var _legend_key := ""
+var _title_text := ""
 var _menu_was_pressed := false
 var _cooldown := 0.0
 
@@ -46,16 +59,26 @@ var _panel_pointers: Array[XRUIPointer] = []
 var _panel_stack: Control # main page
 var _legend_page: Control # controls legend page
 var _legend_lines: Label
+var _title_label: Label
+var _nav_row: HBoxContainer
+var _nav_prev: Button
+var _nav_next: Button
+var _nav_cb := Callable()
+var _direct: DirectUIInput = null
 
 var _dwell_t := 0.0
 var _dwell_pos := Vector2.ZERO
 var _dwell_ring: MeshInstance3D
+
+var _last_click_msec := 0
+var _last_click_pos := Vector2(-9999, -9999)
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_exit_button()
 	_build_panel()
+	_build_direct_input()
 	_panel_root.visible = false
 	_exit_root.visible = false
 
@@ -70,6 +93,8 @@ func _process(delta: float) -> void:
 	for p in _exit_pointers + _panel_pointers:
 		if is_instance_valid(p):
 			p.xr_mode = xr
+	if _direct != null and is_instance_valid(_direct):
+		_direct.xr_mode = xr
 	_update_menu_button()
 	if not _attached:
 		return
@@ -107,14 +132,21 @@ func _input(event: InputEvent) -> void:
 
 ## ---- public API (called by main.gd) ----
 
-func attach(restart: Callable, quit: Callable, legend_key: String = "") -> void:
+func attach(restart: Callable, quit: Callable, legend_key: String = "",
+		title: String = "") -> void:
 	_restart_cb = restart
 	_quit_cb = quit
 	_legend_key = legend_key
+	_title_text = title
 	_attached = true
 	_pause_open = false
+	clear_nav() # fresh attach = fresh nav state (main re-sets it after)
 	_panel_root.visible = false
 	_exit_root.visible = true
+	if _title_label != null:
+		_title_label.text = title if title != "" else "Pausa"
+	if _direct != null:
+		_direct.set_target(_exit_viewport, _exit_quad)
 	# The main scene exists now (autoloads ready before it): wire controllers.
 	_ensure_origin()
 	_add_controller_pointers(_exit_pointers, _exit_viewport, _exit_quad)
@@ -131,6 +163,20 @@ func detach() -> void:
 
 func is_pause_open() -> bool:
 	return _pause_open
+
+
+## Pause-menu Next/Prev row (v0.6.2, PAUSE_MENU_UX §1): walks the same 11-item
+## list order as the launcher menu, wrapping around.
+func set_nav(prev_label: String, next_label: String, nav_cb: Callable) -> void:
+	_nav_cb = nav_cb
+	_nav_prev.text = prev_label
+	_nav_next.text = next_label
+	_nav_row.visible = true
+
+
+func clear_nav() -> void:
+	_nav_cb = Callable()
+	_nav_row.visible = false
 
 
 ## ---- pause state ----
@@ -153,6 +199,8 @@ func _open() -> void:
 	_panel_root.visible = true
 	_show_main_page()
 	_dwell_t = 0.0
+	if _direct != null:
+		_direct.set_target(_panel_viewport, _panel_quad)
 	MarigoldHaptics.confirm()
 	# v0.6.1: gameplay telemetry — pause opens feed "where do players pause".
 	var gt := get_node_or_null("/root/GameplayTelemetry")
@@ -167,6 +215,8 @@ func _resume() -> void:
 	get_tree().paused = false
 	_duck_audio(false)
 	_panel_root.visible = false
+	if _direct != null:
+		_direct.set_target(_exit_viewport, _exit_quad)
 	if _attached:
 		_exit_root.visible = true
 	MarigoldHaptics.confirm()
@@ -182,6 +232,12 @@ func _on_quit() -> void:
 	_resume()
 	if _quit_cb.is_valid():
 		_quit_cb.call()
+
+
+func _on_nav(dir: int) -> void:
+	if _nav_cb.is_valid():
+		_resume()
+		_nav_cb.call(dir)
 
 
 func _duck_audio(on: bool) -> void:
@@ -240,6 +296,7 @@ func _add_controller_pointers(arr: Array[XRUIPointer], viewport: SubViewport,
 		p.controller = ctl
 		p.setup(viewport, quad, _xr_origin)
 		p.xr_clicked.connect(_on_pointer_clicked.bind(p))
+		p.xr_moved.connect(_on_pointer_moved.bind(p))
 		add_child(p)
 		arr.append(p)
 
@@ -327,37 +384,46 @@ func _build_panel() -> void:
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right"]:
 		margin.add_theme_constant_override(side, 56)
-	margin.add_theme_constant_override("margin_top", 44)
-	margin.add_theme_constant_override("margin_bottom", 44)
+	margin.add_theme_constant_override("margin_top", 36)
+	margin.add_theme_constant_override("margin_bottom", 36)
 	bg.add_child(margin)
 
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 16)
+	vb.add_theme_constant_override("separation", 12)
 	vb.alignment = BoxContainer.ALIGNMENT_CENTER
 	margin.add_child(vb)
 
-	var title := Label.new()
-	title.text = "Pausa"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 84)
-	title.add_theme_color_override("font_color", C_MARIGOLD)
-	vb.add_child(title)
-	# v0.6.0: papel-picado header strip (finding 6).
-	var tr := TextureRect.new()
-	tr.texture = MarigoldPapelPicado.banner_texture_2d(4242, 512, 96)
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tr.custom_minimum_size = Vector2(0, 64)
-	tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.add_child(tr)
+	# v0.6.2: title shows the current chapter/experience name so Restart's
+	# target is obvious (PAUSE_MENU_UX §4.5).
+	_title_label = Label.new()
+	_title_label.text = "Pausa"
+	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_title_label.add_theme_font_size_override("font_size", 72)
+	_title_label.add_theme_color_override("font_color", C_MARIGOLD)
+	vb.add_child(_title_label)
 
 	_panel_stack = VBoxContainer.new()
-	_panel_stack.add_theme_constant_override("separation", 14)
+	_panel_stack.add_theme_constant_override("separation", 10)
 	vb.add_child(_panel_stack)
-	_add_panel_button(_panel_stack, "Continuar  (Resume)", _resume)
-	_add_panel_button(_panel_stack, "Reiniciar  (Restart)", _on_restart)
-	_add_panel_button(_panel_stack, "Controles  (Controls)", _show_legend_page)
-	_add_panel_button(_panel_stack, "Salir al menu  (Quit)", _on_quit)
+	# PAUSE_MENU_UX §1 order: Resume (safest, top) / Controls / Restart /
+	# Nav row (leave-this-item zone) / Exit (bottom, red, full-width).
+	_add_panel_button(_panel_stack, "Continuar  (Resume)", C_GREEN, _resume)
+	_add_panel_button(_panel_stack, "Controles  (Controls)", C_BLUE, _show_legend_page)
+	_add_panel_button(_panel_stack, "Reiniciar  (Restart)", C_ORANGE, _on_restart)
+
+	_nav_row = HBoxContainer.new()
+	_nav_row.add_theme_constant_override("separation", 12)
+	_nav_row.visible = false
+	_panel_stack.add_child(_nav_row)
+	_nav_prev = _add_panel_button(_nav_row, "◀ Prev", C_STEEL,
+			Callable(self, "_on_nav").bind(-1))
+	_nav_next = _add_panel_button(_nav_row, "Next ▶", C_STEEL,
+			Callable(self, "_on_nav").bind(1))
+
+	var exit := _add_panel_button(_panel_stack, "SALIR AL INICIO  (EXIT)",
+			C_RED, _on_quit)
+	exit.custom_minimum_size = Vector2(0, 110)
+	exit.add_theme_font_size_override("font_size", 46)
 
 	_legend_page = VBoxContainer.new()
 	_legend_page.add_theme_constant_override("separation", 14)
@@ -368,7 +434,7 @@ func _build_panel() -> void:
 	_legend_lines.add_theme_color_override("font_color", C_CREAM)
 	_legend_lines.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_legend_page.add_child(_legend_lines)
-	_add_panel_button(_legend_page, "Atras  (Back)", _show_main_page)
+	_add_panel_button(_legend_page, "Atras  (Back)", C_BLUE, _show_main_page)
 
 	_panel_quad = _make_quad(_panel_root, PANEL_SIZE, _panel_viewport)
 	_make_pointers(_panel_pointers, _panel_viewport, _panel_quad)
@@ -383,27 +449,30 @@ func _build_panel() -> void:
 	_dwell_ring.mesh = ring
 	_dwell_ring.material_override = MarigoldFX.glow(Color(1.0, 0.85, 0.4), 2.5)
 	_dwell_ring.visible = false
-	_panel_root.add_child(_dwell_ring)
+	add_child(_dwell_ring) # on the pause root: shared by exit + panel quads
 
 
-func _add_panel_button(parent: Control, text: String, cb: Callable) -> Button:
+func _add_panel_button(parent: Control, text: String, accent: Color,
+		cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.add_theme_font_size_override("font_size", 44)
 	b.add_theme_color_override("font_color", Color(1, 1, 1))
-	b.custom_minimum_size = Vector2(0, 96)
+	b.add_theme_color_override("font_hover_color", Color(0.1, 0.05, 0.1))
+	b.custom_minimum_size = Vector2(0, 88)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = C_PLUM_LIGHT
-	normal.border_color = C_MARIGOLD
+	normal.border_color = accent
 	normal.set_border_width_all(3)
 	normal.set_corner_radius_all(16)
 	var hover := normal.duplicate() as StyleBoxFlat
-	hover.bg_color = Color(0.42, 0.16, 0.30, 0.98)
-	hover.border_color = C_PINK
+	hover.bg_color = accent
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = accent.lightened(0.2)
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.pressed.connect(cb)
 	parent.add_child(b)
@@ -424,15 +493,20 @@ func _show_legend_page() -> void:
 func _place_panel() -> void:
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
-		_panel_root.position = Vector3(0, 1.5, -1.8)
+		_panel_root.position = Vector3(0, 1.5, -PANEL_DISTANCE)
 		_panel_root.rotation = Vector3.ZERO
 		return
 	var fwd := -cam.global_transform.basis.z
 	fwd.y = 0.0
-	fwd = fwd.normalized() if fwd.length_squared() > 0.001 else Vector3(0, 0, -1)
-	_panel_root.global_position = cam.global_position + fwd * 1.7 + Vector3(0, -0.1, 0)
-	_panel_root.rotation.y = atan2(-fwd.x, -fwd.z)
-	_panel_root.rotation.x = 0.0
+	if fwd.length_squared() < 0.001:
+		fwd = Vector3(0, 0, -1)
+	else:
+		fwd = fwd.normalized()
+	var target := cam.global_position + fwd * PANEL_DISTANCE
+	target.y = clampf(cam.global_position.y, 1.1, 1.75)
+	_panel_root.global_position = target
+	var to_user := cam.global_position - target
+	_panel_root.rotation = Vector3(0, atan2(to_user.x, to_user.z), 0)
 
 
 ## ---- shared quad + pointer rig ----
@@ -461,8 +535,78 @@ func _make_pointers(arr: Array[XRUIPointer], viewport: SubViewport, quad: MeshIn
 		hp.hand_side = side
 		hp.setup(viewport, quad, _xr_origin)
 		hp.xr_clicked.connect(_on_pointer_clicked.bind(hp))
+		hp.xr_moved.connect(_on_pointer_moved.bind(hp))
 		add_child(hp)
 		arr.append(hp)
+
+
+## v0.6.2: belt-and-suspenders fallback. Starts on the exit quad; _open() and
+## _resume() re-target it between the exit button and the pause panel.
+func _build_direct_input() -> void:
+	_direct = DirectUIInput.new()
+	_direct.name = "DirectUIInput"
+	_direct.setup(_exit_viewport, _exit_quad, _xr_origin,
+			Callable(self, "_on_fallback_clicked"),
+			Callable(self, "_on_fallback_moved"))
+	add_child(_direct)
+
+
+## ---- centralized click funnel (both paths, deduped) ----
+
+func _active_viewport() -> SubViewport:
+	return _panel_viewport if _pause_open else _exit_viewport
+
+
+func _inject_click(pos: Vector2) -> void:
+	var vp := _active_viewport()
+	if vp == null:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_click_msec < CLICK_DEDUPE_MS \
+			and pos.distance_to(_last_click_pos) < CLICK_DEDUPE_PX:
+		return
+	_last_click_msec = now
+	_last_click_pos = pos
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = pos
+	vp.push_input(press)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = pos
+	vp.push_input(release)
+
+
+func _inject_motion(pos: Vector2) -> void:
+	var vp := _active_viewport()
+	if vp == null:
+		return
+	var mv := InputEventMouseMotion.new()
+	mv.position = pos
+	vp.push_input(mv)
+
+
+## v0.6.2 FIX: the old handler only noted the input method and never pushed
+## the click into the viewport — laser clicks in the pause menu did nothing.
+func _on_pointer_clicked(viewport_pos: Vector2, p: XRUIPointer) -> void:
+	if is_instance_valid(p):
+		_note_input_from_pointer(p)
+	_inject_click(viewport_pos)
+
+
+func _on_pointer_moved(viewport_pos: Vector2, _p: XRUIPointer) -> void:
+	_inject_motion(viewport_pos)
+
+
+func _on_fallback_clicked(viewport_pos: Vector2, kind: String) -> void:
+	_note_input_method(kind)
+	_inject_click(viewport_pos)
+
+
+func _on_fallback_moved(viewport_pos: Vector2, _kind: String) -> void:
+	_inject_motion(viewport_pos)
 
 
 func _any_pointer_live() -> bool:
@@ -474,9 +618,22 @@ func _any_pointer_live() -> bool:
 	return false
 
 
-## Gaze dwell fallback: when no XR pointer is live, a 1.2 s look = click.
+## Pixels, not tracker registration: true while EITHER path draws a beam.
+func _any_beam_drawn() -> bool:
+	for p in _exit_pointers + _panel_pointers:
+		if is_instance_valid(p) and p.is_beam_visible():
+			return true
+	if _direct != null and is_instance_valid(_direct) \
+			and _direct.beam_visible_recently(250.0):
+		return true
+	return false
+
+
+## Gaze dwell fallback: when no beam is drawn by either path, a 1.2 s look
+## = click. (Old rule used tracker registration — a live-but-useless
+## tracker hid the reticle AND the lasers were invisible: zero input.)
 func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> void:
-	if _any_pointer_live():
+	if _any_beam_drawn():
 		_dwell_t = 0.0
 		_dwell_ring.visible = false
 		return
@@ -493,9 +650,7 @@ func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> 
 		return
 	var pos: Vector2 = hit["pos"]
 	# Forward hover so buttons highlight.
-	var mv := InputEventMouseMotion.new()
-	mv.position = pos
-	viewport.push_input(mv)
+	_inject_motion(pos)
 	if _dwell_t <= 0.0 or _dwell_pos.distance_to(pos) > 28.0:
 		_dwell_pos = pos
 		_dwell_t = 0.0001
@@ -509,24 +664,8 @@ func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> 
 	if _dwell_t >= DWELL_TIME:
 		_dwell_t = 0.0
 		_dwell_ring.visible = false
-		_push_click(viewport, pos)
-		MarigoldHaptics.confirm()
-
-
-func _push_click(viewport: SubViewport, pos: Vector2) -> void:
-	# Only called from _update_gaze: this click came from the gaze dwell
-	# fallback, so it counts as the gaze input method.
-	_note_input_method("gaze")
-	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
-	press.pressed = true
-	press.position = pos
-	viewport.push_input(press)
-	var release := InputEventMouseButton.new()
-	release.button_index = MOUSE_BUTTON_LEFT
-	release.pressed = false
-	release.position = pos
-	viewport.push_input(release)
+		_note_input_method("gaze")
+		_inject_click(pos)
 
 
 ## v0.6.1: first click in a chapter session records the input method for
@@ -542,11 +681,6 @@ func _note_input_from_pointer(p: XRUIPointer) -> void:
 		gt.note_input_method("controllers")
 	elif p.hand_side != 0:
 		gt.note_input_method("hands")
-
-
-func _on_pointer_clicked(_viewport_pos: Vector2, p: XRUIPointer) -> void:
-	if is_instance_valid(p):
-		_note_input_from_pointer(p)
 
 
 func _note_input_method(method: String) -> void:

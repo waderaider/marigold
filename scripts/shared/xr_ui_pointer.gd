@@ -56,10 +56,12 @@ func _build_visuals() -> void:
 	laser_mat.albedo_color = Color(1.0, 0.62, 0.15)
 	laser_mat.emission_enabled = true
 	laser_mat.emission = Color(1.0, 0.62, 0.15)
-	laser_mat.emission_energy_multiplier = 2.0
+	# v0.6.2: thickened/brightened — 4mm beams were plausibly invisible in
+	# wade's headset photos (~6 display px at 2m).
+	laser_mat.emission_energy_multiplier = 4.0
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.004
-	cyl.bottom_radius = 0.004
+	cyl.top_radius = 0.008
+	cyl.bottom_radius = 0.008
 	cyl.height = 1.0
 	_laser = MeshInstance3D.new()
 	_laser.name = "Laser"
@@ -73,10 +75,10 @@ func _build_visuals() -> void:
 	dot_mat.albedo_color = Color(1.0, 1.0, 1.0)
 	dot_mat.emission_enabled = true
 	dot_mat.emission = Color(1.0, 1.0, 1.0)
-	dot_mat.emission_energy_multiplier = 3.0
+	dot_mat.emission_energy_multiplier = 5.0
 	var sph := SphereMesh.new()
-	sph.radius = 0.016
-	sph.height = 0.032
+	sph.radius = 0.024
+	sph.height = 0.048
 	_dot = MeshInstance3D.new()
 	_dot.name = "HitDot"
 	_dot.mesh = sph
@@ -141,10 +143,32 @@ func _controller_state() -> Dictionary:
 	var gt := controller.global_transform
 	res["origin"] = gt.origin
 	res["dir"] = -gt.basis.z.normalized()
-	var pressed: bool = controller.get_float("trigger") > TRIGGER_THRESHOLD \
-		or controller.is_button_pressed("trigger_click")
-	res["pressed"] = pressed
+	res["pressed"] = XRUIPointer.trigger_pressed(controller)
 	return res
+
+
+## Hardened trigger read shared by the primary path and the DirectUIInput
+## fallback. openxr_action_map.tres typings (verified 2026-10-09): "trigger"
+## is FLOAT-typed (bound to /input/trigger/value), "trigger_click" is
+## BOOLEAN-typed — each is read with its matching accessor, never crossed.
+static func trigger_pressed(ctl: XRController3D) -> bool:
+	if ctl == null or not is_instance_valid(ctl):
+		return false
+	# XRController3D has no has_action(); guard via the global InputMap
+	# (the OpenXR action map registers its actions there).
+	if InputMap.has_action("trigger") and ctl.get_float("trigger") > TRIGGER_THRESHOLD:
+		return true
+	if ctl.is_button_pressed("trigger_click"):
+		return true
+	return false
+
+
+## True while this pointer is actually drawing a visible beam on screen.
+## Used by the gaze fallback and diagnostics: the "no beam drawn" signal is
+## keyed on real pixels, never on tracker registration (which can be live
+## while the beam is useless — the F3 failure mode).
+func is_beam_visible() -> bool:
+	return _laser != null and _laser.visible and _laser.scale.y > 0.01
 
 
 func _hand_state(delta: float) -> Dictionary:
@@ -163,28 +187,63 @@ func _hand_state(delta: float) -> Dictionary:
 			return res
 	if not _hand_tracker.has_tracking_data:
 		return res
-	var tip_flags: int = _hand_tracker.get_hand_joint_flags(
+	var hr := XRUIPointer.hand_ray_from_tracker(_hand_tracker, xr_origin)
+	res["active"] = bool(hr["active"])
+	res["origin"] = hr["origin"]
+	res["dir"] = hr["dir"]
+	res["pressed"] = bool(hr["pinch"])
+	return res
+
+
+## Static hand ray for the DirectUIInput fallback: looks up the hand tracker
+## itself (no cached instance needed) and returns the same {active, origin,
+## dir, pinch} dict as _hand_state.
+static func hand_ray(hand_side: int, origin: Node3D) -> Dictionary:
+	var tname := &"left_hand"
+	if hand_side == XRPositionalTracker.TRACKER_HAND_RIGHT:
+		tname = &"right_hand"
+	var t: XRTracker = XRServer.get_tracker(tname)
+	if not (t is XRHandTracker):
+		return {"active": false, "origin": Vector3.ZERO,
+				"dir": Vector3(0.0, 0.0, 1.0), "pinch": false}
+	var ht := t as XRHandTracker
+	if not ht.has_tracking_data:
+		return {"active": false, "origin": Vector3.ZERO,
+				"dir": Vector3(0.0, 0.0, 1.0), "pinch": false}
+	return XRUIPointer.hand_ray_from_tracker(ht, origin)
+
+
+## Joint-space ray math shared by _hand_state and hand_ray().
+## Returns {"active": bool, "origin": Vector3, "dir": Vector3, "pinch": bool}.
+static func hand_ray_from_tracker(ht: XRHandTracker, origin: Node3D) -> Dictionary:
+	var res := {
+		"active": false,
+		"origin": Vector3.ZERO,
+		"dir": Vector3(0.0, 0.0, 1.0),
+		"pinch": false,
+	}
+	var tip_flags: int = ht.get_hand_joint_flags(
 		XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
 	var need: int = XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID \
 		| XRHandTracker.HAND_JOINT_FLAG_POSITION_TRACKED
 	if (tip_flags & need) == 0:
 		return res
-	var prox := _hand_tracker.get_hand_joint_transform(
+	var prox := ht.get_hand_joint_transform(
 		XRHandTracker.HAND_JOINT_INDEX_FINGER_PHALANX_PROXIMAL)
-	var thumb := _hand_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_THUMB_TIP)
-	var index := _hand_tracker.get_hand_joint_transform(
+	var thumb := ht.get_hand_joint_transform(XRHandTracker.HAND_JOINT_THUMB_TIP)
+	var index := ht.get_hand_joint_transform(
 		XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
 	# Joint transforms are in tracking space; the XROrigin3D maps that to world.
 	var o := Transform3D.IDENTITY
-	if xr_origin != null and is_instance_valid(xr_origin):
-		o = xr_origin.global_transform
+	if origin != null and is_instance_valid(origin):
+		o = (origin as Node3D).global_transform
 	var prox_w: Transform3D = o * prox
 	var thumb_w: Transform3D = o * thumb
 	var index_w: Transform3D = o * index
 	res["active"] = true
 	res["origin"] = prox_w.origin
 	res["dir"] = -prox_w.basis.z.normalized()
-	res["pressed"] = thumb_w.origin.distance_to(index_w.origin) < PINCH_THRESHOLD
+	res["pinch"] = thumb_w.origin.distance_to(index_w.origin) < PINCH_THRESHOLD
 	return res
 
 

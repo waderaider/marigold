@@ -29,10 +29,15 @@ extends Node
 const FLUSH_INTERVAL := 60.0
 const MAX_EVENTS := 300
 const MANIFEST_URL := "https://raw.githubusercontent.com/waderaider/marigold/main/version.json"
+## No-secret fallback (2026-10-09): POST /report needs no key (the read key is
+## server-side only). Compiled-in because the async version.json fetch is the
+## prime suspect for zero telemetry ever arriving from the headset.
+const RELAY_FALLBACK_URL := "https://nexus-log-relay.brio-00c.workers.dev/report"
 
 var _events: Array[Dictionary] = []
 var _session_id := ""
-var _report_url := ""
+## Starts as the compiled-in fallback; the remote version.json may override.
+var _report_url := RELAY_FALLBACK_URL
 var _http: HTTPRequest = null
 var _config_http: HTTPRequest = null
 var _flush_timer := 0.0
@@ -200,7 +205,11 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 		return
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
 	if data is Dictionary:
-		_report_url = str((data as Dictionary).get("report_url", "")).strip_edges()
+		var remote := str((data as Dictionary).get("report_url", "")).strip_edges()
+		# Only the remote manifest may override the compiled-in fallback;
+		# an empty field must never blank a working URL.
+		if remote != "":
+			_report_url = remote
 
 
 func _detect_headset() -> String:

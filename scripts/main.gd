@@ -1,5 +1,10 @@
 ## main.gd - MARIGOLD bootstrap: XR init, title screen, chapter flow,
-## immersive/AR mode toggle, and Check for Updates UI.
+## immersive/AR mode, and Check for Updates UI.
+## v0.6.2: staged boot — XR init first, then the menu panel (frame 1 fast);
+## MarigoldSky, music streams, and the updater build AFTER first frame or on
+## chapter load. The menu uses a flat backdrop; the sky builds on chapter
+## load. Mode toggle and time-of-day selector removed from the menu (default
+## immersive; flagged in release notes).
 extends Node3D
 
 const CHAPTERS := [
@@ -30,10 +35,15 @@ const EXPERIENCES := {
 		"desc": "Your altar of memories - the candle-lit reveal", "keyart": "res://assets/keyart/ofrenda_finale.png"},
 }
 
+## Unified pause-nav + menu list order: 5 chapters in story order, then the
+## 6 experiences (finale last). PAUSE_MENU_UX §3 — one order everywhere so
+## "down the list = Next".
+const MENU_ORDER := ["ch1", "ch2", "ch3", "ch4", "ch5", "mano_magica",
+		"guitarra", "pinta", "espejo", "galeria", "ofrenda_finale"]
+
 const PROGRESS_FILE := "user://marigold_progress.cfg"
 
 var _sky: MarigoldSky
-var _title_root: Node3D
 var _chapter_root: Node3D
 var _chapter_index := -1
 var _current_chapter: Node3D = null
@@ -41,39 +51,37 @@ var _updater: MarigoldUpdater
 var _menu: MarigoldMenu
 var _pending_apk := ""
 var _xr: OpenXRInterface = null
-var _t := 0.0
 var _current_kind := "" # "chapter" | "exp" - for pause restart
 var _current_exp_key := ""
+var _music: MarigoldMusic = null
 
 
 func _ready() -> void:
 	MarigoldState.reset()
-	# Living sky: day/night cycle, weather, wind. Replaces the old static night sky.
-	_sky = MarigoldSky.new()
-	_sky.name = "MarigoldSky"
-	add_child(_sky)
 	_chapter_root = Node3D.new()
 	_chapter_root.name = "ChapterRoot"
 	add_child(_chapter_root)
 
-	var music := MarigoldMusic.new()
-	music.name = "MarigoldMusic"
-	add_child(music)
-	MarigoldState.music = music
-
+	# XR init FIRST: the compositor needs it, and everything after it is
+	# staged so frame 1 stays fast.
 	_xr = XRServer.find_interface("OpenXR")
 	if _xr and _xr.initialize():
 		get_viewport().use_xr = true
 		$XROrigin3D/XRCamera3D.current = true
-		set_ar_mode(false) # start immersive
 	else:
 		_xr = null
 		push_warning("[MARIGOLD] OpenXR unavailable - desktop fallback")
 		$DesktopCamera.current = true
 
-	_build_backdrop()
 	_build_menu()
+	call_deferred("_stage2")
 
+
+## Stage 2 (deferred, after first frame): music node (streams lazy-load on
+## first play) + the update checker. Sky is NOT built here — it builds on
+## chapter load, and the menu uses a flat backdrop.
+func _stage2() -> void:
+	_ensure_music()
 	_updater = MarigoldUpdater.new()
 	_updater.name = "Updater"
 	add_child(_updater)
@@ -81,21 +89,35 @@ func _ready() -> void:
 	_updater.download_completed.connect(_on_download_completed)
 	_updater.download_failed.connect(_on_download_failed)
 
+## ---- lazy singletons ----
 
-func _process(delta: float) -> void:
-	_t += delta
-	if _title_root and is_instance_valid(_title_root):
-		_title_root.rotation.y = sin(_t * 0.1) * 0.05
+func _ensure_music() -> void:
+	if _music != null and is_instance_valid(_music):
+		return
+	_music = MarigoldMusic.new()
+	_music.name = "MarigoldMusic"
+	add_child(_music)
+	MarigoldState.music = _music
+
+
+## The sky builds on chapter load (never at menu time). Chapters use
+## MarigoldSky.instance null-safely.
+func _ensure_sky() -> void:
+	if _sky != null and is_instance_valid(_sky):
+		return
+	_sky = MarigoldSky.new()
+	_sky.name = "MarigoldSky"
+	add_child(_sky)
 
 
 ## ---- Immersive / AR mode ----
 
 func set_ar_mode(on: bool) -> void:
 	MarigoldState.ar_mode = on
-	if _menu:
-		_menu.set_mode(on)
 	if _xr == null:
 		return # desktop: visual change only
+	if _sky == null:
+		return # sky not built yet (menu stage): immersive default stands
 	if on and _xr.get_supported_environment_blend_modes().has(XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND):
 		get_viewport().transparent_bg = true
 		_sky.world_env.environment.background_mode = Environment.BG_COLOR
@@ -111,21 +133,7 @@ func set_ar_mode(on: bool) -> void:
 		_current_chapter.apply_mode(on)
 
 
-## ---- Backdrop + 2D menu ----
-
-func _build_backdrop() -> void:
-	# 3D wow-backdrop behind the 2D menu: marigold field, god rays, motes.
-	_title_root = Node3D.new()
-	_title_root.name = "TitleRoot"
-	_title_root.position = Vector3(0, 0, -2.5)
-	add_child(_title_root)
-
-	MarigoldModels.make_flower_field(_title_root, 200, 10.0, 2026)
-	MarigoldFX.make_god_ray(_title_root, Vector3(0, 0, -3), 9.0)
-	MarigoldFX.make_god_ray(_title_root, Vector3(-4, 0, -5), 9.0, Color(1.0, 0.5, 0.7))
-	MarigoldFX.spawn_ambient_motes(_title_root, Vector3(0, 1.5, 0), 4.0, 60)
-	MarigoldFX.make_luminous_water(_title_root, 40.0).position.y = -0.05
-
+## ---- 2D menu ----
 
 func _build_menu() -> void:
 	_menu = MarigoldMenu.new()
@@ -156,14 +164,11 @@ func _build_menu() -> void:
 	_menu.set_progress(int(prog.get("current", 0)), prog.get("completed", []))
 	var ver: String = ProjectSettings.get_setting("application/config/version", "0.3.0")
 	_menu.set_version("v" + ver)
-	_menu.set_mode(MarigoldState.ar_mode)
 	_menu.chapter_chosen.connect(_on_menu_chapter)
 	_menu.experience_chosen.connect(_on_menu_experience)
-	_menu.mode_toggled.connect(_on_toggle_mode)
 	_menu.updates_requested.connect(_on_check_updates)
 	_menu.download_requested.connect(_on_download_update)
 	_menu.install_requested.connect(_on_install_update)
-	_menu.time_mode_chosen.connect(_on_time_mode)
 
 
 func _on_menu_chapter(idx: int) -> void:
@@ -188,6 +193,8 @@ func _load_experience(key: String, via: String = "menu") -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
+	_ensure_sky()
+	_ensure_music()
 	var info: Dictionary = EXPERIENCES[key]
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
@@ -218,9 +225,64 @@ func _on_experience_complete() -> void:
 
 ## Wire the pause overlay + controller skins + start legend for a chapter.
 func _wire_pause_and_skins(key: String, display_name: String) -> void:
-	MarigoldPause.attach(Callable(self, "_restart_current"), Callable(self, "_quit_to_menu"), key)
+	MarigoldPause.attach(Callable(self, "_restart_current"),
+			Callable(self, "_quit_to_menu"), key, display_name)
+	_update_pause_nav()
 	MarigoldControllerSkins.apply($XROrigin3D, key)
 	MarigoldControllerSkins.show_legend(_chapter_root, key, display_name)
+
+
+## Unified 11-item list order (same as the menu): prev/next wrap around.
+func _update_pause_nav() -> void:
+	var cur := _current_menu_key()
+	var i := MENU_ORDER.find(cur)
+	if i < 0:
+		MarigoldPause.clear_nav()
+		return
+	var prev_key: String = MENU_ORDER[(i - 1 + MENU_ORDER.size()) % MENU_ORDER.size()]
+	var next_key: String = MENU_ORDER[(i + 1) % MENU_ORDER.size()]
+	MarigoldPause.set_nav("◀ " + _item_name(prev_key),
+			_item_name(next_key) + " ▶", Callable(self, "_on_pause_nav"))
+
+
+func _current_menu_key() -> String:
+	if _current_kind == "chapter" and _chapter_index >= 0 \
+			and _chapter_index < CHAPTERS.size():
+		return String(CHAPTERS[_chapter_index]["key"])
+	if _current_kind == "exp":
+		return _current_exp_key
+	return ""
+
+
+func _item_name(key: String) -> String:
+	for c in CHAPTERS:
+		if String(c["key"]) == key:
+			return String(c["name"])
+	if EXPERIENCES.has(key):
+		return String(EXPERIENCES[key]["name"])
+	return key
+
+
+func _load_item(key: String, via: String) -> void:
+	for i in range(CHAPTERS.size()):
+		if String(CHAPTERS[i]["key"]) == key:
+			_load_chapter(i, via)
+			return
+	if EXPERIENCES.has(key):
+		_load_experience(key, via)
+
+
+## Pause-menu Next/Prev: leave the current item for the adjacent one.
+func _on_pause_nav(dir: int) -> void:
+	var cur := _current_menu_key()
+	var i := MENU_ORDER.find(cur)
+	if i < 0:
+		return
+	var target: String = MENU_ORDER[(i + dir + MENU_ORDER.size()) % MENU_ORDER.size()]
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("nav")
+	_load_item(target, "nav")
 
 
 func _restart_current() -> void:
@@ -242,26 +304,21 @@ func _quit_to_menu() -> void:
 		_current_chapter = null
 	_current_kind = ""
 	_current_exp_key = ""
-	MarigoldState.music.stop()
+	if MarigoldState.music != null:
+		MarigoldState.music.stop()
 	MarigoldState.reset()
-	if _sky:
+	if _sky != null and is_instance_valid(_sky):
 		_sky.set_gentle_mode(false) # experiences may have requested gentle weather
 	MarigoldPause.detach()
 	_menu.show_menu()
 
 
-func _on_toggle_mode() -> void:
-	set_ar_mode(not MarigoldState.ar_mode)
-
-
-func _on_time_mode(mode: String) -> void:
-	if _sky:
-		_sky.set_time_mode(mode)
-
-
 ## ---- Update checker ----
 
 func _on_check_updates() -> void:
+	if _updater == null:
+		_menu.set_status("Update checker is still loading — try again in a moment.")
+		return
 	_menu.set_status("Checking for updates...")
 	_menu.clear_update_buttons()
 	_updater.check_for_updates()
@@ -277,6 +334,8 @@ func _on_check_completed(has_update: bool, latest_version: String, changelog: St
 
 
 func _on_download_update() -> void:
+	if _updater == null:
+		return
 	_menu.set_status("Downloading update...")
 	_updater.download_update()
 
@@ -288,6 +347,8 @@ func _on_download_completed(apk_path: String) -> void:
 
 
 func _on_install_update() -> void:
+	if _updater == null:
+		return
 	if _pending_apk != "" and _updater.install_update(_pending_apk):
 		_menu.set_status("Opening installer...")
 	else:
@@ -319,6 +380,8 @@ func _load_chapter(idx: int, via: String = "menu") -> void:
 	if idx < 0 or idx >= CHAPTERS.size():
 		_show_finale_card()
 		return
+	_ensure_sky()
+	_ensure_music()
 	var info: Dictionary = CHAPTERS[idx]
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
@@ -411,9 +474,9 @@ func _refresh_menu_progress() -> void:
 
 
 func _show_finale_card() -> void:
-	MarigoldState.music.stop()
-	if _sky:
+	if MarigoldState.music != null:
+		MarigoldState.music.stop()
+	if _sky != null and is_instance_valid(_sky):
 		_sky.set_gentle_mode(false)
 	MarigoldPause.detach()
 	_menu.show_finale()
-	MarigoldFX.scatter_petals(_title_root, Vector3(0, 1.5, 0), 80)

@@ -25,6 +25,8 @@ var _thunder_stream: AudioStreamWAV = null
 
 
 func _ready() -> void:
+	# v0.6.2: players only — streams lazy-load on first play_mood so boot
+	# never waits on WAV I/O.
 	for mood in ["tender", "wondrous", "festive", "finale"]:
 		var p := AudioStreamPlayer.new()
 		p.name = "Music_" + mood
@@ -32,12 +34,22 @@ func _ready() -> void:
 		p.bus = "Master"
 		add_child(p)
 		_players[mood] = p
+
+
+## Lazy mood stream load (v0.6.2): the old _ready loaded all 4 WAVs
+## synchronously at boot.
+func _ensure_stream(mood: String) -> AudioStreamPlayer:
+	var p: AudioStreamPlayer = _players.get(mood)
+	if p == null:
+		return null
+	if p.stream == null:
 		var stream: AudioStreamWAV = load(AUDIO_DIR + mood + ".wav")
 		if stream != null:
 			stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
 			stream.loop_begin = 0
 			stream.loop_end = stream.get_data().size() / 2
 			p.stream = stream
+	return p
 
 
 ## Crossfade-free mood switch: stop current, play new loop.
@@ -46,7 +58,7 @@ func play_mood(mood: String) -> void:
 		return
 	stop()
 	_current_mood = mood
-	var p: AudioStreamPlayer = _players.get(mood)
+	var p := _ensure_stream(mood)
 	if p != null and p.stream != null:
 		p.play()
 
