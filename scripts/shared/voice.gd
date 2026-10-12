@@ -45,7 +45,16 @@ func get_envelope() -> float:
 
 ## Play a one-shot dialogue clip on the Voice bus (auto-freed).
 ## This cycle ships the bus + hook; clips are optional content.
-func play_dialogue(stream: AudioStream, volume_db: float = -4.0) -> void:
+## v0.7.0: extended to (stream, speaker, text) per Comfort §4.4 — voice and
+## captions can never drift apart. If stream is null (clip not yet generated),
+## the caption still shows (subtitle fallback for every line).
+func play_dialogue(stream: AudioStream, speaker: String = "", text: String = "", volume_db: float = -4.0) -> void:
+	# Captions always (gated by Subtitles toggle inside).
+	if speaker != "" or text != "":
+		var dur := 0.0
+		if stream != null:
+			dur = stream.get_length() + 0.8
+		MarigoldCaptions.show(speaker, text, dur)
 	if stream == null:
 		return
 	var p := AudioStreamPlayer.new()
@@ -55,3 +64,13 @@ func play_dialogue(stream: AudioStream, volume_db: float = -4.0) -> void:
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
+
+
+## Convenience: play a narrative line by key. Loads from
+## assets/audio/voice/<chapter>/<speaker>_<key>.wav; if missing, caption only.
+func play_line(chapter: String, speaker: String, key: String, text: String, volume_db: float = -4.0) -> void:
+	var path := "res://assets/audio/voice/%s/%s_%s.wav" % [chapter, speaker.to_lower(), key]
+	var stream: AudioStream = null
+	if ResourceLoader.exists(path):
+		stream = load(path) as AudioStream
+	play_dialogue(stream, speaker, text, volume_db)

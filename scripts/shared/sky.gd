@@ -15,6 +15,25 @@ var world_env: WorldEnvironment = null
 var cycle_minutes := 8.0
 
 const TIME_PRESETS := {"dawn": 6.3, "day": 12.0, "sunset": 18.4, "night": 0.0}
+
+## v0.7.0 Animator's plan: locked sky grades per chapter (magic-hour scripting).
+## ch1 night-candle, ch2 sunset, ch3 golden-market, ch4 warm-interior, ch5 dusk-baile.
+const CHAPTER_GRADES := {
+	"ch1": {"time": 0.5, "weather": "clear"},      # night-candle
+	"ch2": {"time": 18.4, "weather": "clear"},     # sunset (locked)
+	"ch3": {"time": 17.2, "weather": "partly"},    # golden-market
+	"ch4": {"time": 19.0, "weather": "clear"},     # warm-interior
+	"ch5": {"time": 18.8, "weather": "clear"},     # dusk-baile
+}
+
+## Lock the sky to a chapter's grade (Animator's plan §1).
+func lock_chapter_grade(chapter: String) -> void:
+	var grade: Dictionary = CHAPTER_GRADES.get(chapter, {})
+	if grade.is_empty():
+		return
+	set_time_mode("fixed")
+	set_time_of_day(float(grade["time"]))
+	set_weather(str(grade["weather"]))
 const TIME_MODES := ["dawn", "day", "sunset", "night", "auto"]
 const WEATHER_STATES := ["clear", "partly", "overcast", "rain", "storm", "fog", "windy"]
 const GENTLE_STATES := ["clear", "partly"]

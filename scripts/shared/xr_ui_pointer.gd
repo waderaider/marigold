@@ -123,7 +123,8 @@ func is_source_live() -> bool:
 	if not xr_mode:
 		return false
 	if hand_side == 0:
-		return controller != null and is_instance_valid(controller) and controller.get_tracker() != null
+		return controller != null and is_instance_valid(controller) \
+			and XRServer.get_tracker(controller.tracker) != null
 	return _hand_tracker != null and _hand_tracker.has_tracking_data
 
 
@@ -137,7 +138,7 @@ func _controller_state() -> Dictionary:
 	if controller == null or not is_instance_valid(controller):
 		return res
 	# No tracker registered (desktop/headless) -> pointer stays hidden.
-	if controller.get_tracker() == null:
+	if XRServer.get_tracker(controller.tracker) == null:
 		return res
 	res["active"] = true
 	var gt := controller.global_transform

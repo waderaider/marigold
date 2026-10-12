@@ -126,11 +126,18 @@ func _on_first_frame() -> void:
 
 func _process(delta: float) -> void:
 	var xr := get_viewport().use_xr
+	# v0.7.0 Settings: input-method preference is real — the
+	# non-preferred path's beams stay hidden.
+	var hide_hands := MarigoldGfx.controllers_only()
+	var hide_ctl := MarigoldGfx.hands_only()
 	for p in _pointers:
 		if is_instance_valid(p):
 			p.xr_mode = xr
+			var is_hand := p.hand_side != 0
+			p.enabled = not ((hide_hands and is_hand) or (hide_ctl and not is_hand))
 	if _direct != null and is_instance_valid(_direct):
 		_direct.xr_mode = xr
+		_direct.input_filter = MarigoldGfx.input_pref()
 	# Re-settle one-shot: HMD pose is often identity at menu build time.
 	if _resettle_t > 0.0:
 		_resettle_t -= delta
@@ -336,6 +343,63 @@ func _stage1() -> void:
 	_recenter_panel()
 	_resettle_t = RESETTLE_DELAY
 	call_deferred("_stage2")
+	# v0.7.0 full-featured bar: the menu was completely silent. Start a
+	# warm tender loop so the launcher has music from first frame.
+	if MarigoldState.music != null:
+		MarigoldState.music.play_mood("tender")
+	# v0.7.0 telemetry fix (Headset Specialist): menu-only sessions
+	# previously generated ZERO events, so _flush_now() early-returned and
+	# nothing ever POSTed. A menu_open boot event (version + input
+	# inventory) makes every launch visible, then flushes immediately.
+	_log_menu_open()
+	_check_pending_crash()
+
+
+## v0.7.0: log a menu_open boot event so menu-only sessions generate
+## telemetry (fixes the zero-phone-home gap).
+func _log_menu_open() -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt == null:
+		return
+	var ver := str(ProjectSettings.get_setting("application/config/version", "0.0.0"))
+	gt.event("menu_open", {
+		"version": ver,
+		"controllers": _diag_controllers(),
+		"hands": _diag_hands(),
+		"xr": get_viewport().use_xr,
+		"headset": _headset_model(),
+	})
+	gt.flush()
+
+
+## v0.7.0 crash parity (BugReporter port): MARIGOLD has no crash-prompt UI,
+## so a pending crash from the previous session auto-sends with a note, and
+## any reports saved while offline are retried.
+func _check_pending_crash() -> void:
+	var br := get_node_or_null("/root/BugReporter")
+	if br == null:
+		return
+	var pending: Dictionary = br.prompt_if_crash_pending()
+	if not pending.is_empty():
+		br.send_report("auto: previous MARIGOLD session crashed (game=%s)" 				% str(pending.get("game", "?")))
+		br.acknowledge_crash()
+	br.retry_pending()
+
+
+## Headset model via XR_META_headset_id (v0.7.0 platform item F).
+func _headset_model() -> String:
+	# The extension only answers when the OpenXR runtime initialized it
+	# (headless/desktop: skip quietly instead of logging errors).
+	var xr := XRServer.find_interface("OpenXR")
+	if xr == null or not (xr as XRInterface).is_initialized():
+		return "desktop"
+	if Engine.has_singleton("OpenXRMetaHeadsetIDExtension"):
+		var ext = Engine.get_singleton("OpenXRMetaHeadsetIDExtension")
+		if ext != null and ext.has_method("get_headset_id"):
+			var hid := str(ext.call("get_headset_id")).strip_edges()
+			if hid != "":
+				return hid
+	return "unknown"
 
 
 ## ---- stage 2 (deferred, low priority): altar decor ----
@@ -577,7 +641,10 @@ func _rebuild_list() -> void:
 		var row := _make_row("%d. %s%s" % [i + 1, mark, name],
 				String(info.get("desc", "")))
 		var idx := i
-		row.pressed.connect(func() -> void: chapter_chosen.emit(idx))
+		row.pressed.connect(func() -> void:
+			if MarigoldState.music != null:
+				MarigoldState.music.chime(72) # v0.7.0 UI chime
+			chapter_chosen.emit(idx))
 		_list_vbox.add_child(row)
 	_add_section_header("EXPERIENCES")
 	for key in EXP_ORDER:
@@ -587,7 +654,10 @@ func _rebuild_list() -> void:
 		var row := _make_row(String(info.get("name", "Experience")),
 				String(info.get("desc", "")))
 		var k := String(info.get("key", key))
-		row.pressed.connect(func() -> void: experience_chosen.emit(k))
+		row.pressed.connect(func() -> void:
+			if MarigoldState.music != null:
+				MarigoldState.music.chime(72) # v0.7.0 UI chime
+			experience_chosen.emit(k))
 		_list_vbox.add_child(row)
 
 
@@ -1032,8 +1102,8 @@ func _refresh_diag() -> void:
 	var warn := ""
 	if get_viewport().use_xr and _no_beam_s > 3.0:
 		warn = "  ⚠ NO INPUT SOURCE LIVE — look at a button and hold 1.2s"
-	_diag_label.text = "Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s" \
-			% [ctl, hands, gaze, dist, boot, warn]
+	_diag_label.text = "Headset: %s · Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s" \
+			% [_headset_model(), ctl, hands, gaze, dist, boot, warn]
 
 
 func _diag_controllers() -> String:
@@ -1043,7 +1113,7 @@ func _diag_controllers() -> String:
 		return "none"
 	for ctl in _xr_origin.find_children("*", "XRController3D", true, false):
 		var c := ctl as XRController3D
-		if c == null or c.get_tracker() == null:
+		if c == null or XRServer.get_tracker(c.tracker) == null:
 			continue
 		var nm := String(c.name).to_lower()
 		if nm.find("left") >= 0:
@@ -1089,6 +1159,7 @@ func _test_connection() -> void:
 		"version": str(ProjectSettings.get_setting(
 				"application/config/version", "0.0.0")),
 		"ts": int(Time.get_unix_time_from_system()),
+		"headset": _headset_model(),
 		"input": _diag_label.text if _diag_label != null else "",
 	}
 	_ping_http.request(RELAY_PING_URL,

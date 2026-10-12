@@ -53,12 +53,28 @@ var _water: MeshInstance3D # luminous water: rain ripples answer the weather (v0
 var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+
+
 func setup(ar_mode: bool) -> void:
 	_build()
 	apply_mode(ar_mode)
 	_update_plaque(-1)
 	_toast("Cross the bridge — pass through each glowing ring", 7.0)
 
+	# v0.7.0: large-scale world vista (wade's order) — mictlan horizon.
+	# ch2 already has a city; the vista adds mountains + sky dome + midground.
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "mictlan", 70.0)
+
+	# v0.7.0 Animator: lock the chapter's sky grade (magic-hour scripting).
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.lock_chapter_grade("ch2")
+	MarigoldAmbient.add_petals(self, Vector3(0, 2.5, -8), 20, 5.0) # v0.7.0 Animator: bridge petals
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -87,6 +103,7 @@ func apply_mode(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	if _plaque:
 		MarigoldPlaques.face_player(_plaque)

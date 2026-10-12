@@ -17,10 +17,16 @@ var _plaque: Node3D
 var _stage_home := Vector3(0, 0, -0.2)
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+
+
 func setup(ar_mode: bool) -> void:
 	_build()
 	apply_mode(ar_mode)
 
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -38,6 +44,7 @@ func apply_mode(on: bool) -> void:
 
 
 func _process(_delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, _delta)
 	# The gallery is a stroll, not a task: it completes only when the
 	# player exits via the pause menu. Keep the plaque readable.
 	if _plaque and is_instance_valid(_plaque):

@@ -21,7 +21,7 @@ const PHASES := [
 	{"st": St.SCULPT, "title": "4 · Esculpe - Sculpt", "hint": "PINCH-HOLD near the clay and MOVE to shape it", "dur": 16.0},
 	{"st": St.CONDUCT, "title": "5 · Dirige - Conduct", "hint": "Sweep your hand - up for high bells, down for low", "dur": 14.0},
 	{"st": St.PET, "title": "6 · Acaricia - Pet", "hint": "Gently stroke the alebrije (slow hands!)", "dur": 14.0},
-	{"st": St.FINALE, "title": "¡Bravo!", "hint": "Your hands are magic", "dur": 5.0},
+	{"st": St.FINALE, "title": "¡Dirige! · Conduct the band", "hint": "Sweep your hand — big sweeps, big sound", "dur": 10.0},
 ]
 
 const C_ORANGE := Color(1.0, 0.62, 0.12)
@@ -65,6 +65,14 @@ var _tick_cd := 0.0
 var _conduct_count := 0
 var _cond_prev_y := 0.0
 var _cond_armed := true
+var _band: Array = [] # v0.7.0: the ch5 band lineup for the conducting finale
+var _conduct_prev := Vector3.ZERO
+var _conduct_cd := 0.0
+var _conduct_idx := 0
+var _touched_was := false # v0.7.0: first-touch edge for SHY + anticipation
+var _first_touch_done := false
+var _shy_t := 0.0
+var _deer_anticip := 0.0
 var _sweep_cd := 0.0
 var _alebrije: Node3D
 var _alebrije_home := Vector3(0, 0.55, -1.9)
@@ -76,6 +84,9 @@ var _deer_rig: MarigoldCharacterRig = null
 var _startle_cd := 0.0
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+
+
 func setup(ar_mode: bool) -> void:
 	_build()
 	apply_mode(ar_mode)
@@ -83,6 +94,9 @@ func setup(ar_mode: bool) -> void:
 		MarigoldSky.instance.set_gentle_mode(true)
 	_start_phase(0)
 
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -110,6 +124,7 @@ func _music():
 
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	if _plaque and is_instance_valid(_plaque):
 		MarigoldPlaques.face_player(_plaque)
@@ -118,8 +133,10 @@ func _process(delta: float) -> void:
 	_phase_t += delta
 	_update_hand_glow(delta)
 	match _phase:
-		St.WELCOME, St.FINALE:
+		St.WELCOME:
 			pass
+		St.FINALE:
+			_update_finale_conduct(delta)
 		St.PINCH:
 			_update_pinch(delta)
 		St.GRAB:
@@ -134,6 +151,38 @@ func _process(delta: float) -> void:
 			_update_pet(delta)
 	_update_phase_flow(delta)
 	MarigoldCharacterRig.update_all(delta, MarigoldCharacterRig.default_ctx(self))
+
+
+## 7. FINALE — conduct the ch5 band (v0.7.0: replaces the 5 s "¡Bravo!"
+## card with the promised 10 s conducting). Your sweeps lead the band:
+## each strong sweep cues the next musician's phrase, louder with bigger
+## gestures. The band's groove already tempo-follows your hands.
+func _update_finale_conduct(delta: float) -> void:
+	var ctx := MarigoldCharacterRig.default_ctx(self)
+	var m = _music()
+	if m != null and m.has_method("get_beat_phase"):
+		ctx["beat_phase"] = float(m.call("get_beat_phase"))
+	for d in _band:
+		var dd: Dictionary = d
+		if dd.has("root"):
+			MarigoldBanda.update_musician(dd, delta, ctx, m)
+	_conduct_cd = maxf(0.0, _conduct_cd - delta)
+	var hp := _pointer(MarigoldHands.HAND_RIGHT)
+	var sweep := 0.0
+	if _conduct_prev != Vector3.ZERO:
+		sweep = (hp - _conduct_prev).length() / maxf(delta, 0.001)
+	_conduct_prev = hp
+	# A strong sweep cues the next musician (round-robin), big = loud.
+	if sweep > 1.6 and _conduct_cd <= 0.0:
+		_conduct_cd = 0.45
+		var dd2: Dictionary = _band[_conduct_idx % 3]
+		_conduct_idx += 1
+		var vol := clampf(0.55 + sweep * 0.12, 0.55, 1.0)
+		MarigoldBanda.play_phrase(dd2, m, vol)
+		MarigoldHaptics.pulse(vol, 0.18)
+		MarigoldFX.spawn_sparks(_stage, hp, C_GOLD, 8)
+		_prog_label.text = "¡Olé!  %d" % _conduct_idx
+		MarigoldPhotos.note_moment("conduct_band")
 
 
 ## ---------------- phase flow ----------------
@@ -380,6 +429,28 @@ func _attach_deer_face() -> void:
 			"eye_positions": [Vector3(-0.08, 0.08, 0.17), Vector3(0.08, 0.08, 0.17)],
 			"eye_radius": 0.035, "glow": Color(0.3, 0.9, 0.7),
 			"face_pos": Vector3(0, 0.05, 0.10), "seed": 42})
+	_build_band()
+
+
+## v0.7.0: the conducting finale's band — the ch5 street-musician lineup
+## (guitarron + trumpet + violin), arranged in an arc before the player.
+func _build_band() -> void:
+	var accents := [Color(1.0, 0.45, 0.20), Color(0.20, 0.80, 1.0), Color(1.0, 0.65, 0.10)]
+	for i in 3:
+		var d := MarigoldBanda.make_musician(accents[i], i, 900 + i)
+		var root: Node3D = d["root"]
+		var a := -0.5 + float(i) * 0.5
+		root.position = Vector3(sin(a) * 1.6, 0, -2.6 + (1.0 - cos(a)) * 0.8)
+		root.rotation.y = -a * 0.6
+		root.visible = false
+		_stage.add_child(root)
+		d["base_y"] = 0.0
+		_band.append(d)
+	var umb := MarigoldBanda.make_umbrella(Color(1.0, 0.55, 0.15))
+	umb.position = Vector3(0, 0, -2.6)
+	umb.visible = false
+	_stage.add_child(umb)
+	_band.append({"umbrella": umb})
 
 
 func _station_nodes(st: int) -> Array:
@@ -397,11 +468,19 @@ func _station_nodes(st: int) -> Array:
 			return [_clay]
 		St.PET:
 			return [_alebrije]
+		St.FINALE:
+			var arr: Array = []
+			for d in _band:
+				if (d as Dictionary).has("root"):
+					arr.append((d as Dictionary)["root"])
+				elif (d as Dictionary).has("umbrella"):
+					arr.append((d as Dictionary)["umbrella"])
+			return arr
 	return []
 
 
 func _hide_all_stations() -> void:
-	for st in [St.PINCH, St.GRAB, St.THROW, St.SCULPT, St.PET]:
+	for st in [St.PINCH, St.GRAB, St.THROW, St.SCULPT, St.PET, St.FINALE]:
 		for n in _station_nodes(st):
 			(n as Node3D).visible = false
 	_target_ring.visible = false
@@ -438,6 +517,10 @@ func _show_station(idx: int) -> void:
 			_cond_armed = true
 		St.PET:
 			_pet_acc = 0.0
+		St.FINALE:
+			_conduct_cd = 0.0
+			_conduct_idx = 0
+			_conduct_prev = _pointer(MarigoldHands.HAND_RIGHT)
 
 
 func _hide_station(idx: int) -> void:
@@ -644,6 +727,22 @@ func _update_pet(delta: float) -> void:
 		if pp.distance_to(center) < 0.38:
 			touched = true
 			break
+	# v0.7.0: first touch = SHY (the dead expression, wired) + a 150 ms
+	# anticipation crouch before the deer decides how to react.
+	if touched and not _touched_was and not _first_touch_done:
+		_first_touch_done = true
+		_shy_t = 1.6
+		_deer_anticip = 0.15
+		if _deer_rig != null:
+			_deer_rig.set_expression("SHY", 0.4)
+	_touched_was = touched
+	if _deer_anticip > 0.0:
+		_deer_anticip = maxf(0.0, _deer_anticip - delta)
+		var ak := _deer_anticip / 0.15
+		_alebrije.scale = Vector3(1.0 + 0.07 * ak, 1.0 - 0.09 * ak, 1.0 + 0.07 * ak)
+	else:
+		_alebrije.scale = Vector3.ONE
+	_shy_t = maxf(0.0, _shy_t - delta)
 	if touched:
 		var spd: float = maxf(
 			MarigoldHands.grab_speed(self, MarigoldHands.HAND_RIGHT),
@@ -661,7 +760,8 @@ func _update_pet(delta: float) -> void:
 			if _deer_rig != null:
 				_deer_rig.set_relax(minf(1.0, _pet_acc / 2.0) * 0.85)
 				_deer_rig.set_ear_flat(0.0)
-				_deer_rig.set_expression("JOY", 0.6)
+				if _shy_t <= 0.0:
+					_deer_rig.set_expression("JOY", 0.6)
 			_purr_cd -= delta
 			if _purr_cd <= 0.0:
 				_purr_cd = 1.6
@@ -677,7 +777,7 @@ func _update_pet(delta: float) -> void:
 				_succeed("New spirit friend!")
 		else:
 			# Fast hands startle it: SURPRISED + ears flatten (teaches gentle hands).
-			if _deer_rig != null:
+			if _deer_rig != null and _shy_t <= 0.0:
 				_deer_rig.set_expression("SURPRISED", 0.3)
 				_deer_rig.set_ear_flat(1.0)
 				_deer_rig.set_relax(0.0)

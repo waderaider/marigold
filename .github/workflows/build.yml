@@ -74,3 +74,46 @@ jobs:
           name: Marigold-APK
           path: builds/Marigold.apk
           if-no-files-found: error
+
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Godot 4.7.2
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_v4.7.2-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+
+      - name: Install Godot export templates
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/4.7.2.stable
+          mkdir -p /tmp/godot-tpl
+          unzip -q -o Godot_v4.7.2-stable_export_templates.tpz -d /tmp/godot-tpl
+          cp -r /tmp/godot-tpl/templates/* ~/.local/share/godot/export_templates/4.7.2.stable/
+
+      - name: Synthesize music
+        run: |
+          python3 tools/make_music.py
+
+      - name: Build Windows PC VR
+        run: |
+          mkdir -p builds/Marigold-Windows
+          ./Godot_v4.7.2-stable_linux.x86_64 --headless --export-debug "MARIGOLD (Windows PC VR)" builds/Marigold-Windows/Marigold.exe
+          ls -lh builds/Marigold-Windows/
+
+      - name: Zip Windows build
+        run: |
+          cd builds/Marigold-Windows
+          zip -r ../Marigold-v0.7.0-windows.zip .
+          cd ../..
+          ls -lh builds/Marigold-v0.7.0-windows.zip
+
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Marigold-Windows
+          path: builds/Marigold-v0.7.0-windows.zip
+          if-no-files-found: error

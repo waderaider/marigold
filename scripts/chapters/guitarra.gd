@@ -174,6 +174,10 @@ func _ready() -> void:
 	MarigoldAmbient.add_spirits(self, 5, 16.0)
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+
+
 func setup(ar_mode: bool) -> void:
 	_ar_mode = ar_mode
 	# Gentle weather during the performance: no thunderstorm mid-song.
@@ -181,6 +185,13 @@ func setup(ar_mode: bool) -> void:
 		MarigoldSky.instance.set_gentle_mode(true)
 	apply_mode(ar_mode)
 
+	# v0.7.0: large-scale world vista (wade's order) — fiesta horizon.
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "fiesta", 60.0)
+
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -191,6 +202,7 @@ func apply_mode(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	_update_wind_fx() # banners ripple, lantern flames dance with gusts
 	if _judge_t > 0.0:

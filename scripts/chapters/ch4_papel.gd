@@ -112,10 +112,27 @@ func _ready() -> void:
 	MarigoldFX.make_light_rig(self, 0.9)
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+
+
 func setup(ar_mode: bool) -> void:
 	_ar_mode = ar_mode
 	apply_mode(ar_mode)
 
+	# v0.7.0: large-scale world vista (wade's order) — layered sky dome,
+	# far church/mountain landmarks, mid-ground trees/lamps. VR only.
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "pueblo", 60.0)
+
+	# v0.7.0 Animator: lock the chapter's sky grade (magic-hour scripting).
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.lock_chapter_grade("ch4")
+	MarigoldAmbient.add_dust(self, Vector3(3.0, 5.0, 8.0)) # v0.7.0 Animator: dust in god-ray shafts
+	MarigoldAmbient.add_petals(self, Vector3(0, 2.5, 0), 16, 4.0) # v0.7.0 Animator: papel scraps drift
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -160,6 +177,7 @@ func apply_mode(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	_update_hand_waves(delta)
 	_update_banners(delta)

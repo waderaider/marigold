@@ -22,6 +22,11 @@ static func make_musician(accent: Color, idx: int, seed: int = 0, opts: Dictiona
 	var root: Node3D = d["root"]
 	var body: Node3D = d["body"]
 	var rig: MarigoldCharacterRig = d["rig"]
+	if rig != null:
+		# v0.7.0 P0: band pupils (shared meshes, ~6 transform writes each).
+		# Musicians are the most-watched faces in the market scenes — lock
+		# them featured so the crowd rule never hides their pupils.
+		rig.featured_lock = true
 	# Sombrero (wide brim + low crown). NOTE: body is scaled 2.64x, so these
 	# are model-space coordinates (x2.64 in world).
 	var brim := MeshInstance3D.new()
@@ -51,7 +56,8 @@ static func make_musician(accent: Color, idx: int, seed: int = 0, opts: Dictiona
 	# Market umbrella: pole + canopy (shared by the chapter per band).
 	return {"root": root, "body": body, "rig": rig, "instrument": inst,
 		"kind": kind, "phrase": _phrase_for(kind), "wave_t": 0.0,
-		"greet_cd": 0.0, "phase": float(idx) * 2.1}
+		"greet_cd": 0.0, "phase": float(idx) * 2.1, "energy": 0.0,
+		"resp_cd": 0.0}
 
 
 static func _build_instrument(kind: String, accent: Color) -> Node3D:
@@ -156,7 +162,38 @@ static func make_umbrella(accent: Color) -> Node3D:
 	return root
 
 
-## Per-frame: beat-synced bob + approach wave + greeting phrase.
+## Play one musician's phrase (call-and-response / conducting / greeting).
+## volume scales with the player's dance energy (louder when they move).
+static func play_phrase(d: Dictionary, music: Object, volume: float = 0.55) -> void:
+	var root: Node3D = d["root"]
+	if root == null or not is_instance_valid(root):
+		return
+	if music == null or not (music as Object).has_method("pluck"):
+		return
+	var tree := root.get_tree()
+	var phrase: Array = d["phrase"]
+	for i in phrase.size():
+		var note := int(phrase[i])
+		var dl := float(i) * 0.22
+		if tree != null:
+			tree.create_timer(dl).timeout.connect(
+				func() -> void:
+					if music != null and is_instance_valid(root):
+						(music as Object).call("pluck", note, volume, 0.9))
+	var rig: MarigoldCharacterRig = d["rig"]
+	if rig != null:
+		rig.set_expression("JOY", 0.4)
+		rig.set_speaking(true) # syllable fallback = musical mouthing
+		if tree != null:
+			tree.create_timer(0.22 * float(phrase.size()) + 0.3).timeout.connect(
+				func() -> void:
+					if rig != null:
+						rig.set_speaking(false)
+						rig.clear_expression())
+
+
+## Per-frame: beat-synced bob + approach wave + greeting phrase +
+## v0.7.0 tempo-follow (the band locks to YOUR energy) + call-and-response.
 ## ctx: default_ctx + "beat_phase". music: MarigoldMusic (for phrases).
 static func update_musician(d: Dictionary, delta: float, ctx: Dictionary, music: Object) -> void:
 	var root: Node3D = d["root"]
@@ -168,12 +205,28 @@ static func update_musician(d: Dictionary, delta: float, ctx: Dictionary, music:
 	var pulse := 0.5 + 0.5 * sin(t * 2.2 + float(d.get("phase", 0.0)))
 	if beat >= 0.0:
 		pulse = pow(1.0 - beat, 2.0)
-	# Beat-synced instrument bob.
+	# v0.7.0 tempo-follow: player hand speed = dance/strum energy. The
+	# band's groove amplitude follows it (bigger moves, bigger band).
+	var energy := 0.0
+	for h in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+		energy = maxf(energy, MarigoldHands.grab_speed(root, h))
+	energy = clampf(energy / 3.0, 0.0, 1.0)
+	d["energy"] = lerpf(float(d.get("energy", 0.0)), energy,
+		clampf(3.0 * delta, 0.0, 1.0))
+	var groove := 0.7 + 0.6 * float(d["energy"])
+	# Beat-synced instrument bob (amplitude rides the player's energy).
 	var inst: Node3D = d["instrument"]
 	if inst != null and is_instance_valid(inst):
-		inst.rotation.x = sin(t * 4.4 + float(d.get("phase", 0.0))) * 0.12 * (0.4 + pulse)
-		inst.position.y = 1.02 + pulse * 0.05
-	root.position.y = float(d.get("base_y", 0.0)) + pulse * 0.04
+		inst.rotation.x = sin(t * 4.4 + float(d.get("phase", 0.0))) * 0.12 * (0.4 + pulse) * groove
+		inst.position.y = 1.02 + pulse * 0.05 * groove
+	root.position.y = float(d.get("base_y", 0.0)) + pulse * 0.04 * groove
+	# Call-and-response: when the player really moves (energy spike), the
+	# band answers with its phrase — louder with dance energy (6 s cd).
+	d["resp_cd"] = maxf(0.0, float(d.get("resp_cd", 0.0)) - delta)
+	if energy > 0.62 and float(d.get("resp_cd", 0.0)) <= 0.0:
+		d["resp_cd"] = 6.0
+		play_phrase(d, music, 0.55 + 0.35 * energy)
+		MarigoldPhotos.note_moment("band_response")
 	# Approach: wave + greeting phrase (cooldown 20 s).
 	d["greet_cd"] = maxf(0.0, float(d.get("greet_cd", 0.0)) - delta)
 	var pp: Variant = ctx.get("player_pos", null)
@@ -181,20 +234,7 @@ static func update_musician(d: Dictionary, delta: float, ctx: Dictionary, music:
 		if root.global_position.distance_to(pp) < 2.5:
 			d["greet_cd"] = 20.0
 			d["wave_t"] = 1.6
-			if rig != null:
-				rig.set_expression("JOY", 0.4)
-				rig.set_speaking(true) # syllable fallback = musical mouthing
-			if music != null and (music as Object).has_method("pluck"):
-				var phrase: Array = d["phrase"]
-				for i in phrase.size():
-					var note := int(phrase[i])
-					var dl := float(i) * 0.22
-					var tree := root.get_tree()
-					if tree != null:
-						tree.create_timer(dl).timeout.connect(
-							func() -> void:
-								if music != null and is_instance_valid(root):
-									(music as Object).call("pluck", note, 0.55, 0.9))
+			play_phrase(d, music, 0.55)
 			MarigoldPhotos.note_moment("band_phrase")
 	# Wave: lean + nod while wave_t runs, then settle.
 	var wt: float = float(d.get("wave_t", 0.0))

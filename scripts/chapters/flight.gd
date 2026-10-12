@@ -11,7 +11,7 @@ extends Node3D
 
 signal finished
 
-const SPEED := 6.0 # m/s of town travel
+const SPEED := 6.0 # m/s of town travel (peak; eased at both ends)
 
 var _t := 0.0
 var _dur := 16.0
@@ -19,31 +19,90 @@ var _town: Node3D
 var _label: Label3D
 var _sub: Label3D
 var _done := false
+var _bell_done := false # church-bell landmark toll (once)
+var _arrival_done := false # the arrival beat (once)
+var _wind_t := 0.0 # wind-haptic pulse timer
+var _slipstream: GPUParticles3D = null # v0.7.0 VFX: speed streaks
 
 
 func begin(parent: Node, from_name: String, to_name: String, duration: float = 16.0) -> void:
 	parent.add_child(self)
 	_dur = duration
 	_build(from_name, to_name)
+	# v0.7.0 VFX: departure updraft + slipstream streaks for the glide.
+	MarigoldSpectacle.flight_depart(self, Vector3(0, 1.0, -3.0))
+	_slipstream = MarigoldSpectacle.flight_slipstream(self)
 	if MarigoldSky.instance != null:
 		MarigoldSky.instance.set_time_mode("fixed")
 		MarigoldSky.instance.set_time_of_day(21.5) # deep night over the town
 		MarigoldSky.instance.set_weather("clear")
 
 
+## v0.7.0 VFX: kill the slipstream streaks (they trail off behind).
+func _stop_slipstream() -> void:
+	if _slipstream != null and is_instance_valid(_slipstream):
+		var s := _slipstream
+		_slipstream = null
+		s.emitting = false
+		get_tree().create_timer(1.0).timeout.connect(s.queue_free)
+
+
+## Speed curve: gentle departure, full glide mid-flight, soft settle into
+## arrival. Returns 0.35..1.0.
+func _speed_mult() -> float:
+	var k := clampf(_t / _dur, 0.0, 1.0)
+	return 0.35 + 0.65 * sin(PI * k)
+
+
 func _process(delta: float) -> void:
 	if _done:
+		# v0.7.0 Comfort: clear vignette when flight ends.
+		MarigoldVignette.set_motion(0.0)
 		return
 	_t += delta
+	var spd := _speed_mult()
+	# v0.7.0 Comfort: vignette ramps with flight speed (Comfort §4.2).
+	MarigoldVignette.set_motion(spd)
 	if _town != null:
-		_town.position.z += SPEED * delta
+		_town.position.z += SPEED * spd * delta
+	# Velocity-tied wind: ambience bed volume + haptic breath follow speed.
+	var m = MarigoldState.music
+	if m != null and m.has_method("set_ambience_volume"):
+		m.call("set_ambience_volume", lerpf(-26.0, -10.0, spd))
+	_wind_t -= delta
+	if _wind_t <= 0.0:
+		_wind_t = 0.45
+		MarigoldHaptics.pulse(0.15 + 0.45 * spd, 0.30)
 	if _label != null:
 		var a_in := clampf(_t / 2.0, 0.0, 1.0)
 		var a_out := clampf((_dur - _t) / 2.5, 0.0, 1.0)
 		_label.modulate.a = minf(a_in, a_out)
 		_sub.modulate.a = minf(a_in, a_out) * 0.85
+	# Look-at landmark: the church bell tolls as the steeple passes.
+	if not _bell_done and _t >= _dur * 0.55:
+		_bell_done = true
+		if m != null and m.has_method("chime"):
+			m.call("chime", 48, 0.9) # low bell
+			m.call("chime", 55, 0.5)
+		MarigoldSpectacle.bell_flash(self, Vector3(0, 9.0, -55))
+		MarigoldHaptics.thump()
+	# The ARRIVAL beat: descent settle, landing thump, then the music
+	# crossfade happens in main._on_flight_done.
+	if not _arrival_done and _t >= _dur - 2.0:
+		_arrival_done = true
+		MarigoldHaptics.thump()
+		if m != null and m.has_method("play_stinger"):
+			m.call("play_stinger", "bow_drum", -8.0)
+		# v0.7.0 VFX: landing wash + petal shower; slipstream dies out.
+		MarigoldSpectacle.flight_arrival(self, Vector3(0, 0.5, -4.0))
+		_stop_slipstream()
+		if _sub != null:
+			_sub.text = "ya llegamos · we have arrived"
 	if _t >= _dur:
 		_done = true
+		_stop_slipstream()
+		if m != null and m.has_method("stop_ambience"):
+			m.call("stop_ambience")
 		if MarigoldSky.instance != null:
 			MarigoldSky.instance.set_time_mode("auto")
 		finished.emit()
@@ -172,5 +231,9 @@ func _build(from_name: String, to_name: String) -> void:
 	_sub.position = Vector3(0, 1.45, -6)
 	_sub.modulate.a = 0.0
 	add_child(_sub)
-	if MarigoldState.music != null and MarigoldState.music.has_method("chime"):
-		MarigoldState.music.chime(72, 0.5)
+	if MarigoldState.music != null:
+		if MarigoldState.music.has_method("chime"):
+			MarigoldState.music.chime(72, 0.5)
+		# Wind bed for the glide (volume rides the speed curve).
+		if MarigoldState.music.has_method("play_ambience"):
+			MarigoldState.music.play_ambience("wind")

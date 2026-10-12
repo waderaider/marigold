@@ -93,9 +93,15 @@ static func make_point_light(parent: Node3D, pos: Vector3, color: Color, energy:
 
 
 ## One-shot spark burst at a position. Frees itself when done.
+
+## v0.7.0: scale a requested particle count by the graphics-quality
+## multiplier (Low halves ambient particle load; Ultra adds 25%).
+static func _pcount(amount: int) -> int:
+	return maxi(1, int(round(float(amount) * MarigoldGfx.particle_scale())))
+
 static func spawn_sparks(parent: Node, pos: Vector3, color: Color = Color(1.0, 0.8, 0.2), amount: int = 24) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = amount
+	p.amount = _pcount(amount)
 	p.lifetime = 0.6
 	p.one_shot = true
 	p.explosiveness = 0.9
@@ -165,7 +171,7 @@ static func eye_sparkle(parent: Node, pos: Vector3, color: Color = Color(1.0, 0.
 ## Confetti burst (slower, colorful, low gravity).
 static func spawn_confetti(parent: Node, pos: Vector3, amount: int = 60) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = amount
+	p.amount = _pcount(amount)
 	p.lifetime = 2.0
 	p.one_shot = true
 	p.explosiveness = 0.85
@@ -201,7 +207,7 @@ static func spawn_confetti(parent: Node, pos: Vector3, amount: int = 60) -> GPUP
 ## Ambient floating dust motes around an area (looping, subtle).
 static func spawn_ambient_motes(parent: Node3D, center: Vector3, radius: float = 2.0, amount: int = 40) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = amount
+	p.amount = _pcount(amount)
 	p.lifetime = 6.0
 	p.preprocess = 6.0
 	p.position = center
@@ -376,7 +382,9 @@ void fragment() {
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
 	ALPHA = cut * (1.0 - dots * 0.85);
 	ALBEDO = tint.rgb;
-	EMISSION = tint.rgb * 0.35;
+	EMISSION = tint.rgb * 0.7; // v0.7.0: backlight grade lock — unshaded +
+	// emissive 0.7 reads "glowing paper lantern" at zero light cost. Do NOT
+	// add a directional light behind the banners (design decision).
 }
 """
 	var sm := ShaderMaterial.new()
@@ -541,7 +549,7 @@ static func set_water_rain(water_mi: MeshInstance3D, amount: float) -> void:
 static func petal_ceiling_fall(parent: Node, center: Vector3, radius: float = 2.5,
 		amount: int = 120, duration: float = 20.0, ceiling_y: float = 3.2) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = amount
+	p.amount = _pcount(amount)
 	p.lifetime = 6.0
 	p.preprocess = 2.0
 	p.position = center + Vector3(0, ceiling_y, 0)
@@ -592,7 +600,7 @@ static func _stop_ceiling_fall(p: GPUParticles3D) -> void:
 ## Burst of glowing marigold petals (celebration / footstep scatter).
 static func scatter_petals(parent: Node, pos: Vector3, amount: int = 30) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
-	p.amount = amount
+	p.amount = _pcount(amount)
 	p.lifetime = 1.6
 	p.one_shot = true
 	p.explosiveness = 0.75

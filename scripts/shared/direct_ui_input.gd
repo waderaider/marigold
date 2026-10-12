@@ -28,6 +28,10 @@ var _origin: Node3D = null
 var _click_cb := Callable()
 var _motion_cb := Callable()
 var _enabled := true
+## v0.7.0: input-method preference from Settings (MarigoldGfx). "" = auto
+## (both paths), "controllers" = controller beams only, "hands" = hand
+## beams only. A real behavior change, not a label.
+var input_filter := ""
 ## Mirrors XRUIPointer.xr_mode: set from the owner's use_xr each frame. When
 ## false (desktop/headless) the fallback stays fully inert — the desktop
 ## mouse path owns input there.
@@ -92,12 +96,16 @@ func _process(_delta: float) -> void:
 			_hide_all_beams()
 			return
 	var seen := {}
+	if input_filter == "":
+		input_filter = MarigoldGfx.input_pref()
 	# Controllers: name-agnostic discovery (kills the stale-name failure).
 	for ctl in _origin.find_children("*", "XRController3D", true, false):
+		if input_filter == "hands":
+			continue
 		var c := ctl as XRController3D
 		if c == null or not is_instance_valid(c):
 			continue
-		if c.get_tracker() == null:
+		if XRServer.get_tracker(c.tracker) == null:
 			continue # not live on device
 		var key := "ctl_%d" % c.get_instance_id()
 		seen[key] = true
@@ -105,9 +113,18 @@ func _process(_delta: float) -> void:
 		_handle_source(key, gt.origin, -gt.basis.z.normalized(),
 				XRUIPointer.trigger_pressed(c), c, 0)
 	# Hands: raw tracker pose -> pinch rising edge.
+	if input_filter == "controllers":
+		for key in _beams.keys():
+			if String(key).begins_with("hand_"):
+				_hide_beam(key)
+				_press_state[key] = false
 	for side in [XRPositionalTracker.TRACKER_HAND_LEFT,
 			XRPositionalTracker.TRACKER_HAND_RIGHT]:
 		var key := "hand_%d" % side
+		if input_filter == "controllers":
+			_hide_beam(key)
+			_press_state[key] = false
+			continue
 		var hr := XRUIPointer.hand_ray(side, _origin)
 		if not bool(hr["active"]):
 			_hide_beam(key)

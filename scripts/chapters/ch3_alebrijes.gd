@@ -94,10 +94,27 @@ func _ready() -> void:
 	MarigoldAmbient.add_spirits(self, 5, 16.0)
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+
+
 func setup(ar_mode: bool) -> void:
 	_ar_mode = ar_mode
 	apply_mode(ar_mode)
 
+	# v0.7.0: large-scale world vista (wade's order) — mercado horizon
+	# (ch3 has a skyline; the vista adds mountains + sky dome + midground).
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "mercado", 60.0)
+
+	# v0.7.0 Animator: lock the chapter's sky grade (magic-hour scripting).
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.lock_chapter_grade("ch3")
+	MarigoldAmbient.add_petals(self, Vector3(0, 3.0, 0), 28, 7.0) # v0.7.0 Animator: plaza petals
+	MarigoldAmbient.add_dust(self, Vector3(5.0, 4.0, 5.0)) # v0.7.0 Animator: market dust
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -147,6 +164,7 @@ func apply_mode(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	if _fountain_ring and is_instance_valid(_fountain_ring):
 		_fountain_ring.rotation.y += delta * 0.6
@@ -662,7 +680,7 @@ func _build_band() -> void:
 	umb.position = Vector3(-4.2, 0, 2.8)
 	add_child(umb)
 	for i in 3:
-		var d := MarigoldBanda.make_musician(accents[i], i, 600 + i, {"pupils": false})
+		var d := MarigoldBanda.make_musician(accents[i], i, 600 + i)
 		var root: Node3D = d["root"]
 		root.position = Vector3(-4.7 + float(i) * 0.55, 0, 2.8)
 		root.rotation.y = 0.7
@@ -1360,10 +1378,32 @@ func _animate_guides(delta: float) -> void:
 		if pt <= 0.0:
 			pt = randf_range(4.0, 8.0)
 			g["action_t"] = 1.2
+			# v0.7.0 anticipation (§2.4, the Pixar rule): 150 ms
+			# crouch/lean-back BEFORE the personality action fires.
+			g["anticip_t"] = 0.15
 		g["personality_t"] = pt
+		var anticip: float = float(g.get("anticip_t", 0.0))
+		if anticip > 0.0:
+			g["anticip_t"] = maxf(0.0, anticip - delta)
 		var action: float = float(g["action_t"])
 		if action > 0.0:
 			g["action_t"] = maxf(0.0, action - delta)
+		# v0.7.0 anticipation pose: crouch + lean-back while anticipating,
+		# overshoot for the first 150 ms of the action. Skipped while joy
+		# or hop own the body (they have their own squash-and-stretch).
+		var act: float = float(g["action_t"])
+		if float(g["joy_t"]) <= 0.0 and float(g["hop_t"]) < 0.0:
+			if anticip > 0.0:
+				var ak := anticip / 0.15
+				node.scale = Vector3(1.0 + 0.08 * ak, 1.0 - 0.10 * ak, 1.0 + 0.08 * ak)
+				node.rotation.x = 0.12 * ak
+			elif act > 1.05:
+				var ok := (act - 1.05) / 0.15
+				node.scale = Vector3(1.0 - 0.05 * ok, 1.0 + 0.12 * ok, 1.0 - 0.05 * ok)
+				node.rotation.x = -0.06 * ok
+			else:
+				node.scale = Vector3.ONE
+				node.rotation.x = 0.0
 		# Idle bob (per-guide rhythm).
 		node.position.y = y + sin(_t * float(g["bob_speed"]) + ph) * float(g["bob_amp"])
 		# Wing flap (moth does periodic big bursts). Rest-relative so hero

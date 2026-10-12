@@ -96,6 +96,15 @@ static func clear_registry() -> void:
 	_rigs.clear()
 
 
+## Set one expression on EVERY live rig (chapter-end fades, finale beats).
+## Dead rigs are purged by the next update_all().
+static func set_all_expressions(name: String, blend_time: float = 0.6) -> void:
+	for r in _rigs:
+		var rr: MarigoldCharacterRig = r
+		if rr._root != null and is_instance_valid(rr._root):
+			rr.set_expression(name, blend_time)
+
+
 ## Central per-frame driver. Call ONCE per frame from the active chapter.
 ## ctx keys (all optional): player_pos (Vector3), hands (Array[Vector3]),
 ## voice_env (0..1), beat_phase (-1 idle), t (scene time),
@@ -136,7 +145,9 @@ static func _update_featured(ctx: Dictionary) -> void:
 		order.append({"r": rr, "d": d})
 	order.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["d"]) < float(b["d"]))
 	for k in order.size():
-		(order[k]["r"] as MarigoldCharacterRig).featured = k < 6
+		var rr2: MarigoldCharacterRig = order[k]["r"]
+		if not rr2.featured_lock:
+			rr2.featured = k < 6
 
 
 ## One-line context builder for chapters. All lookups are null-safe and
@@ -374,6 +385,9 @@ var _glow_base := 2.0
 var _rng: RandomNumberGenerator = null
 
 var featured := true
+## v0.7.0: when true, the 4 Hz featured-set refresh never demotes this rig
+## (band musicians keep their pupils even in a 13-rig crowd).
+var featured_lock := false
 var _gaze_mode := LOOK_PLAYER
 var _look_point := Vector3.ZERO
 var _has_look := false

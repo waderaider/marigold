@@ -56,6 +56,7 @@ var _viva_phase := ""
 var _viva_dancers: Array = []
 var _viva_exiting := false
 var _viva_petals_done := false
+var _viva_wonder_done := false
 var _viva_bower: Dictionary = {}
 var _viva_bow_t := 0.0
 var _viva_night_from := 18.4
@@ -88,12 +89,35 @@ var _sway_mats := {} # emission hex -> MarigoldSky.wind_sway_material cache
 var _candle_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": float}
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+var _dialogue_t1 := -1.0 # v0.7.0 Narrative: rosa_welcome_01 timer
+var _dialogue_t2 := -1.0 # v0.7.0 Narrative: rosa_welcome_02 timer
+var _said_welcome1 := false
+var _said_welcome2 := false
+
+
 func setup(ar_mode: bool) -> void:
 	_build()
 	apply_mode(ar_mode)
 	_update_progress()
 	_toast("Build the ofrenda: 6 petals · 3 photos · 5 candles", 7.0)
+	# v0.7.0 Narrative: Rosa's welcome lines (3s + 8s, one-shots).
+	_dialogue_t1 = 3.0
+	_dialogue_t2 = 8.0
 
+	# v0.7.0: large-scale world vista (wade's order) — pueblo horizon.
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "pueblo", 60.0)
+
+	# v0.7.0 Animator: lock the chapter's sky grade (magic-hour scripting).
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.lock_chapter_grade("ch1")
+	MarigoldAmbient.add_petals(self, Vector3(0, 3.0, 0), 24, 6.0) # v0.7.0 Animator: courtyard petals
+	MarigoldAmbient.add_dust(self, Vector3(4.0, 3.0, 4.0)) # v0.7.0 Animator: dust in candlelight
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -122,6 +146,18 @@ func _anchor_key() -> String:
 
 
 func _process(delta: float) -> void:
+	# v0.7.0 Narrative: welcome line timers.
+	if _dialogue_t1 > 0.0:
+		_dialogue_t1 -= delta
+		if _dialogue_t1 <= 0.0 and not _said_welcome1:
+			_said_welcome1 = true
+			MarigoldDialogue.say("rosa_welcome_01")
+	if _dialogue_t2 > 0.0:
+		_dialogue_t2 -= delta
+		if _dialogue_t2 <= 0.0 and not _said_welcome2:
+			_said_welcome2 = true
+			MarigoldDialogue.say("rosa_welcome_02")
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	if _plaque:
 		MarigoldPlaques.face_player(_plaque)
@@ -720,6 +756,23 @@ func _make_salt_dish() -> Node3D:
 	smi.scale = Vector3(1.0, 0.45, 1.0)
 	smi.position.y = 0.025
 	root.add_child(smi)
+	# v0.7.0 P1: glitter sparkle — 7 tiny emissive quads scattered on the
+	# salt surface so the candlelight catches individual grains.
+	var grng := RandomNumberGenerator.new()
+	grng.seed = 4242
+	for gi in 7:
+		var gq := MeshInstance3D.new()
+		var gqm := QuadMesh.new()
+		var gs := grng.randf_range(0.006, 0.011)
+		gqm.size = Vector2(gs, gs)
+		gq.mesh = gqm
+		gq.material_override = MarigoldFX.glow(Color(1.0, 0.96, 0.85), 3.2)
+		var ga := grng.randf() * TAU
+		var gr := grng.randf_range(0.008, 0.038)
+		gq.position = Vector3(cos(ga) * gr, 0.048, sin(ga) * gr)
+		gq.rotation_degrees.x = -90.0
+		gq.rotation.z = grng.randf() * TAU
+		root.add_child(gq)
 	return root
 
 
@@ -1644,6 +1697,13 @@ func _update_viva(delta: float) -> void:
 	if not _viva_spawned and t >= 7.0:
 		_viva_spawned = true
 		_spawn_viva_dancers()
+	# The wonder lands: SORROW -> WONDER ~2 s after the dancers rise.
+	if not _viva_wonder_done and t >= 9.0:
+		_viva_wonder_done = true
+		for d in _viva_dancers:
+			var wrig2: MarigoldCharacterRig = d.get("rig")
+			if wrig2 != null:
+				wrig2.set_expression("WONDER", 2.5) # night wonder
 	# Ceiling petal fall for the dance.
 	if not _viva_petals_done and t >= 8.0:
 		_viva_petals_done = true
@@ -1662,6 +1722,7 @@ func _update_viva(delta: float) -> void:
 			continue # the bower holds its bow
 		if not _viva_rise(d, delta):
 			MarigoldCalavera.dance_update(d, beat, _t, delta)
+			_viva_procession(d, delta)
 	# The bow: at t = 28 the lead dancer stops, faces the player, bows.
 	if _viva_phase != "bow" and t >= 28.0 and not _viva_dancers.is_empty():
 		_viva_phase = "bow"
@@ -1702,6 +1763,25 @@ func _update_viva(delta: float) -> void:
 			if _ar_mode:
 				MarigoldPassthroughGrade.clear()
 			chapter_complete.emit()
+
+
+## v0.7.0 room-weaving: dancers process through the real room (AR) /
+## drift with parallax (VR) — a slow weaving orbit around the player's
+## current position, beat-synced dance on top. Not a camera ring.
+func _viva_procession(d: Dictionary, delta: float) -> void:
+	var root: Node3D = d["root"]
+	if root == null or not is_instance_valid(root):
+		return
+	var cam := _viva_cam_pos()
+	var a := float(d.get("proc_a", 0.0)) + float(d.get("proc_speed", 0.14)) * delta
+	d["proc_a"] = a
+	var r := float(d.get("proc_r", 2.3)) + sin(_t * 0.35 + float(d.get("phase", 0.0))) * 0.7
+	root.position.x = cam.x + cos(a) * r
+	root.position.z = cam.z + sin(a) * r
+	# Drift-face the player (skipped for spinners — they own their yaw).
+	if int(d.get("style", 0)) != 2:
+		var want := atan2(cam.x - root.position.x, cam.z - root.position.z)
+		root.rotation.y = lerp_angle(root.rotation.y, want, clampf(1.5 * delta, 0.0, 1.0))
 
 
 ## Staggered rise from the ground; returns true while still emerging.
@@ -1801,10 +1881,18 @@ func _spawn_viva_dancers() -> void:
 		d["spin_dir"] = 1.0 if i % 2 == 0 else -1.0
 		d["dancer_scale"] = 0.92 + float(i % 3) * 0.06
 		d["rise_t"] = -float(i) * 0.5 # staggered emergence
+		# v0.7.0 room-weaving: the troupe PROCESSES through the room
+		# instead of ringing the camera — slow orbit + weaving radius.
+		d["proc_a"] = a
+		d["proc_r"] = r
+		d["proc_speed"] = 0.14 + float(i % 3) * 0.03
 		_viva_dancers.append(d)
 		var wrig: MarigoldCharacterRig = d.get("rig")
 		if wrig != null:
-			wrig.set_expression("WONDER", 2.5) # night wonder on their faces
+			# v0.7.0: SORROW first (the ache of return), WONDER lands
+			# ~2 s later in _update_viva — the emotional arc the dead
+			# expressions were built for.
+			wrig.set_expression("SORROW", 2.0)
 		MarigoldFX.spawn_sparks(self, Vector3(pos.x, 0.4, pos.z), Color(1.0, 0.7, 0.2), 16)
 	_toast("Los calaveras bailan para ti", 4.0)
 

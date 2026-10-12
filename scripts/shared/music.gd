@@ -7,14 +7,34 @@ class_name MarigoldMusic
 
 const AUDIO_DIR := "res://assets/audio/"
 
-## Beats per minute of each generated mood loop (from tools/make_music.py).
-## Drives get_beat_phase() for beat-synced choreography (v0.5.0).
+## Beats per minute of each generated mood loop (from tools/make_music.py
+## and tools/make_music_v070.py). Drives get_beat_phase() for beat-synced
+## choreography (v0.5.0).
 const BEAT_BPM := {
 	"tender": 60.0,
 	"wondrous": 70.0,
 	"festive": 125.0, # 6/8: eighth = 0.24 s, beat = 2 eighths
 	"finale": 120.0,
+	# v0.7.0 pack (make_music_v070.py): every chapter + the menu gets its
+	# own themed loop (wade's no-placeholders order).
+	"menu": 90.0,        # 3/4 waltz
+	"puente": 70.0,      # 6/8 water theme, beat = 2 eighths
+	"alebrijes": 100.0,  # 2/4 bouncy
+	"papel": 60.0,
+	"baile": 132.0,      # 6/8 banda, beat = quarter
+	"magia": 80.0,
+	"cancion": 110.0,
+	"espejo": 96.0,
+	"recuerdos": 60.0,
+	"ofrenda": 100.0,
 }
+
+## All mood loop names (lazy-loaded on first play_mood).
+const MOODS := [
+	"tender", "wondrous", "festive", "finale",
+	"menu", "puente", "alebrijes", "papel", "baile",
+	"magia", "cancion", "espejo", "recuerdos", "ofrenda",
+]
 
 var _players: Dictionary = {}
 var _current_mood := ""
@@ -27,7 +47,7 @@ var _thunder_stream: AudioStreamWAV = null
 func _ready() -> void:
 	# v0.6.2: players only — streams lazy-load on first play_mood so boot
 	# never waits on WAV I/O.
-	for mood in ["tender", "wondrous", "festive", "finale"]:
+	for mood in MOODS:
 		var p := AudioStreamPlayer.new()
 		p.name = "Music_" + mood
 		p.volume_db = _volume_db
@@ -56,11 +76,39 @@ func _ensure_stream(mood: String) -> AudioStreamPlayer:
 func play_mood(mood: String) -> void:
 	if mood == _current_mood:
 		return
+	if not mood in MOODS:
+		push_warning("[MarigoldMusic] unknown mood: " + mood)
+		return
 	stop()
 	_current_mood = mood
 	var p := _ensure_stream(mood)
 	if p != null and p.stream != null:
+		p.volume_db = _volume_db
 		p.play()
+
+
+## v0.7.0: real crossfade between mood loops (flight arrivals). The old
+## loop fades out over `duration` while the new one fades in — no hard cut.
+func crossfade_to(mood: String, duration: float = 2.0) -> void:
+	if mood == _current_mood:
+		return
+	var old: AudioStreamPlayer = _players.get(_current_mood)
+	var p := _ensure_stream(mood)
+	_current_mood = mood
+	if p == null or p.stream == null:
+		if old != null:
+			old.stop()
+		return
+	p.volume_db = -60.0
+	p.play()
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(p, "volume_db", _volume_db, duration)
+	if old != null and old != p:
+		tw.tween_property(old, "volume_db", -60.0, duration)
+		tw.set_parallel(false)
+		tw.tween_callback(old.stop)
+		tw.tween_callback(func() -> void: old.volume_db = _volume_db)
 
 
 func stop() -> void:
@@ -75,13 +123,34 @@ func set_volume(db: float) -> void:
 		(_players[key] as AudioStreamPlayer).volume_db = db
 
 
-## ---- Weather ambience (MarigoldSky, v0.4.0) ----
-## Looped rain/wind beds, crossfade-free like moods. All content synthesized
-## by tools/make_weather_audio.py - no licensed assets.
+## v0.7.0: music swell — lift the score by amount_db, then settle back.
+## Used by the ofrenda finale's emotional apex.
+func swell(amount_db: float = 5.0, up_time: float = 1.5, down_time: float = 4.0) -> void:
+	var tw := create_tween()
+	tw.tween_method(_apply_swell_volume, 0.0, amount_db, up_time)
+	tw.tween_method(_apply_swell_volume, amount_db, 0.0, down_time)
 
-## Start (or keep) a looped ambience bed. kind: "rain" | "wind".
+
+func _apply_swell_volume(v: float) -> void:
+	for key in _players:
+		(_players[key] as AudioStreamPlayer).volume_db = _volume_db + v
+
+
+## ---- Weather/location ambience (MarigoldSky, v0.4.0; v0.7.0 locations) ----
+## Looped beds, crossfade-free like moods. All content synthesized by
+## tools/make_weather_audio.py + tools/make_sfx_v070.py - no licensed assets.
+## Weather beds: "rain" | "wind". Location beds (v0.7.0): "amb_night" (ch1),
+## "amb_water" (ch2), "amb_plaza" (ch3), "amb_canopy" (ch4), "amb_dance"
+## (ch5), "amb_gallery" (galeria).
+const AMBIENCE_KINDS := [
+	"rain", "wind",
+	"amb_night", "amb_water", "amb_plaza", "amb_canopy", "amb_dance",
+	"amb_gallery",
+]
+
+## Start (or keep) a looped ambience bed.
 func play_ambience(kind: String) -> void:
-	if kind != "rain" and kind != "wind":
+	if not kind in AMBIENCE_KINDS:
 		push_warning("[MarigoldMusic] unknown ambience: " + kind)
 		return
 	var p: AudioStreamPlayer = _amb_players.get(kind)
@@ -161,6 +230,51 @@ func play_stinger(kind: String, volume_db: float = -6.0) -> void:
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
+	_bump_energy(0.5)
+
+
+## ---- One-shot SFX (v0.7.0) ----
+## General one-shots synthesized by tools/make_sfx_v070.py (sfx_*.wav):
+## "ui_select" | "ui_hover" | "ui_back" (menu UI), "camera_shutter"
+## (diegetic folk camera), "candle_ignite" (progressive candle lighting),
+## "chapter_fanfare" (chapter-complete celebration), "bell_toll" (flight
+## landmark), "crowd_cheer" (ch5 dance energy), "petal_rustle" (teleport
+## landing), "spirit_greet" | "spirit_farewell" (original vocalise motifs).
+## Auto-freed like play_thunder/play_stinger.
+var _sfx_streams: Dictionary = {}
+
+func play_sfx(kind: String, volume_db: float = -6.0) -> void:
+	var stream: AudioStreamWAV = _sfx_streams.get(kind)
+	if stream == null:
+		stream = load(AUDIO_DIR + "sfx_" + kind + ".wav") as AudioStreamWAV
+		if stream == null:
+			push_warning("[MarigoldMusic] missing SFX: " + kind)
+			return
+		_sfx_streams[kind] = stream
+	var p := AudioStreamPlayer.new()
+	p.stream = stream
+	p.volume_db = volume_db
+	p.bus = "Master"
+	add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
+	_bump_energy(0.7)
+
+
+## ---- Music energy envelope (v0.7.0) ----
+## Cheap 0..1 "how loud is the music right now" for the Animator's
+## audio-visual sync (guitarra: candle flicker amplitude = f(energy);
+## ch5: crowd pulse). Bumped by every pluck/chime/stinger/sfx call and
+## decays in _process - never reads the audio output, so it's free.
+var energy := 0.0
+
+
+func _process(delta: float) -> void:
+	energy = maxf(0.0, energy - delta * 1.6)
+
+
+func _bump_energy(amount: float) -> void:
+	energy = clampf(energy + amount, 0.0, 1.0)
 
 
 ## ---- Beat tracking (v0.5.0) ----
@@ -236,4 +350,5 @@ func pluck(midi_note: int, volume: float = 0.8, duration: float = 1.2, damp: flo
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
+	_bump_energy(volume * 0.6)
 	return p

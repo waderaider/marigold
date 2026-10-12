@@ -150,6 +150,12 @@ func note_input_method(method: String) -> void:
 	event("input_method", {"chapter": _chapter, "method": method})
 
 
+## v0.7.0: force an immediate POST of queued events (the menu_open boot
+## event calls this so a menu-only session is visible in the relay at once).
+func flush() -> void:
+	_flush_now()
+
+
 ## Error breadcrumb with chapter context (mirrors crash-reporter usage).
 func error(chapter_name: String, message: String, context: String = "") -> void:
 	var fields := {"chapter": chapter_name, "message": message.left(160)}
@@ -172,7 +178,7 @@ func _flush_now() -> void:
 		"version": str(ProjectSettings.get_setting("application/config/version", "0.0.0")),
 		"version_code": int(ProjectSettings.get_setting("application/config/version_code", 0)),
 		"device": OS.get_model_name(),
-		"platform": OS.get_name(),
+		"platform": _platform_tag(),
 		"headset": _detect_headset(),
 		"session_id": _session_id,
 		"timestamp": _iso_now(),
@@ -212,7 +218,25 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 			_report_url = remote
 
 
+## v0.7.0 PC VR (QA §1.11): distinct platform tag so the digest can split
+## Quest vs PC sessions. "PCVR-VirtualDesktop" on Windows, OS name otherwise.
+func _platform_tag() -> String:
+	if OS.has_feature("windows") and not OS.has_feature("android"):
+		return "PCVR-VirtualDesktop"
+	return OS.get_name()
+
+
+## v0.7.0: headset model via the XR_META_headset_id extension
+## (privacy-safe, zero cost). Falls back to the interface scan on desktop.
 func _detect_headset() -> String:
+	var xr := XRServer.find_interface("OpenXR")
+	if xr != null and (xr as XRInterface).is_initialized() \
+			and Engine.has_singleton("OpenXRMetaHeadsetIDExtension"):
+		var ext = Engine.get_singleton("OpenXRMetaHeadsetIDExtension")
+		if ext != null and ext.has_method("get_headset_id"):
+			var hid := str(ext.call("get_headset_id")).strip_edges()
+			if hid != "":
+				return hid
 	for iface in XRServer.get_interfaces():
 		var d: Dictionary = iface
 		if str(d.get("name", "")).to_lower().find("openxr") >= 0:

@@ -31,11 +31,26 @@ name-specific fields:
 
 | Event `name` | Fields | When |
 |---|---|---|
-| `chapter_start` | `chapter` (display name), `key` (e.g. `"ch1"`, `"pinta"`), `via` (`"menu"`\|`"restart"`\|`"complete"`) | `_load_chapter` / `_load_experience`; a new session auto-ends any open one with `exit`=`via` |
-| `chapter_end` | `chapter`, `key`, `duration_s` (float, 0.1s), `exit` (`"quit_to_menu"`\|`"restart"`\|`"completed"`\|`"app_close"`), `input_method` (first-used, `""` if none) | quit/restart/complete/close; idempotent |
-| `pause_open` | `chapter` | pause overlay opened (menu button / Esc / floating button) |
+| `chapter_start` | `chapter` (display name), `key` (e.g. `"ch1"`, `"pinta"`), `via` (`"menu"`\|`"restart"`\|`"complete"`\|`"nav"`) | `_load_chapter` / `_load_experience`; a new session auto-ends any open one with `exit`=`via` |
+| `chapter_end` | `chapter`, `key`, `duration_s` (float, 0.1s), `exit` (`"quit_to_menu"`\|`"restart"`\|`"completed"`\|`"app_close"`\|`"nav"`), `input_method` (first-used, `""` if none) | quit/restart/complete/close/nav-jump; idempotent |
+| `menu_open` | `version`, `controllers` (e.g. `"L+R live"`), `hands`, `xr` (bool), `headset` | **v0.7.0** — logged once at menu boot (stage 1) with an immediate flush; makes menu-only sessions visible (fixes the zero-phone-home gap) |
+| `pause_open` | `chapter`, `via` (`"menu_button"`\|`"exit_button"`\|`"esc"`) | **v0.7.0** — pause overlay opened; `via` attributes the source so the digest can tell accidental taps from real opens |
+| `teleport` | `via` (`"laser"`), `dist` (m, 0.1s) | **v0.7.0** — laser-pointer teleport fired |
 | `input_method` | `chapter`, `method` (`"controllers"`\|`"hands"`\|`"gaze"`\|`"mouse"`) | first input used in a chapter session (first wins) |
 | `error` | `chapter`, `message` (≤160 chars), `context` (≤160 chars, optional) | error breadcrumbs with chapter context (e.g. scene load failure) |
+
+## v0.7.0 additions
+
+- **Crash parity**: the `BugReporter` autoload (ported from NEXUS) writes
+  session logs + clean-exit flags and POSTs crash reports to the same relay.
+  Sessions start/end with each chapter/experience load (`main.gd`); a pending
+  crash from the previous session auto-sends on menu boot (MARIGOLD has no
+  crash-prompt UI).
+- **Headset model**: every report envelope's `headset` field now carries the
+  real model via `XR_META_headset_id` (`OpenXRMetaHeadsetIDExtension`), with
+  fallback to the interface scan on desktop. Also shown on the menu's
+  on-screen diagnostics line and in the Test-connection ping.
+- **`environment_depth`** enabled for passthrough folk scenes (matches NEXUS).
 
 ## Weekly-digest queries this supports
 

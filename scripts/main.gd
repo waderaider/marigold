@@ -202,6 +202,9 @@ func _load_experience(key: String, via: String = "menu") -> void:
 	var scene: PackedScene = load(info["scene"])
 	_current_chapter = scene.instantiate()
 	_chapter_root.add_child(_current_chapter)
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_start(String(info["name"]))
 	if _current_chapter.has_method("setup"):
 		_current_chapter.setup(MarigoldState.ar_mode)
 	if _current_chapter.has_signal("chapter_complete"):
@@ -217,6 +220,8 @@ func _on_experience_complete() -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.chapter_end("completed")
+	# v0.7.0: SLEEPY as the candle-light fades toward the transition.
+	MarigoldCharacterRig.set_all_expressions("SLEEPY", 1.2)
 	await get_tree().create_timer(0.8).timeout
 	_quit_to_menu()
 
@@ -228,8 +233,12 @@ func _wire_pause_and_skins(key: String, display_name: String) -> void:
 	MarigoldPause.attach(Callable(self, "_restart_current"),
 			Callable(self, "_quit_to_menu"), key, display_name)
 	_update_pause_nav()
+	# v0.7.0: the pause grid IS the chapter picker (direct jump).
+	MarigoldPause.set_jump(Callable(self, "_on_pause_jump"))
 	MarigoldControllerSkins.apply($XROrigin3D, key)
-	MarigoldControllerSkins.show_legend(_chapter_root, key, display_name)
+	# v0.7.0: tool-tips toggle — off = no intro legend card for veterans.
+	if MarigoldGfx.tooltips_on():
+		MarigoldControllerSkins.show_legend(_chapter_root, key, display_name)
 
 
 ## Unified 11-item list order (same as the menu): prev/next wrap around.
@@ -272,6 +281,19 @@ func _load_item(key: String, via: String) -> void:
 		_load_experience(key, via)
 
 
+## Pause-grid direct jump: leave the current item for the tapped card.
+## Routes through the same load path as the launcher (autowiring, music,
+## BugReporter session, telemetry run identically).
+func _on_pause_jump(key: String) -> void:
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null:
+		gt.chapter_end("nav")
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_end()
+	_load_item(key, "nav")
+
+
 ## Pause-menu Next/Prev: leave the current item for the adjacent one.
 func _on_pause_nav(dir: int) -> void:
 	var cur := _current_menu_key()
@@ -282,6 +304,9 @@ func _on_pause_nav(dir: int) -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.chapter_end("nav")
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_end()
 	_load_item(target, "nav")
 
 
@@ -289,6 +314,9 @@ func _restart_current() -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.chapter_end("restart")
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_end()
 	if _current_kind == "exp" and _current_exp_key != "":
 		_load_experience(_current_exp_key, "restart")
 	elif _current_kind == "chapter":
@@ -299,6 +327,9 @@ func _quit_to_menu() -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.chapter_end("quit_to_menu")
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_end()
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
@@ -373,7 +404,7 @@ func _petal_transition() -> void:
 	await get_tree().create_timer(1.1).timeout
 
 
-func _load_chapter(idx: int, via: String = "menu") -> void:
+func _load_chapter(idx: int, via: String = "menu", xfade: bool = false) -> void:
 	if _current_chapter:
 		_current_chapter.queue_free()
 		_current_chapter = null
@@ -392,11 +423,18 @@ func _load_chapter(idx: int, via: String = "menu") -> void:
 	var scene: PackedScene = load(info["scene"])
 	_current_chapter = scene.instantiate()
 	_chapter_root.add_child(_current_chapter)
+	var br := get_node_or_null("/root/BugReporter")
+	if br != null:
+		br.session_start(String(info["name"]))
 	if _current_chapter.has_method("setup"):
 		_current_chapter.setup(MarigoldState.ar_mode)
 	if _current_chapter.has_signal("chapter_complete"):
 		_current_chapter.chapter_complete.connect(_on_chapter_complete)
-	MarigoldState.music.play_mood(info["mood"])
+	if xfade and MarigoldState.music != null \
+			and MarigoldState.music.has_method("crossfade_to"):
+		MarigoldState.music.crossfade_to(info["mood"], 2.5)
+	else:
+		MarigoldState.music.play_mood(info["mood"])
 	_current_kind = "chapter"
 	_wire_pause_and_skins(String(info["key"]), String(info["name"]))
 	MarigoldFX.scatter_petals(_chapter_root, Vector3(0, 1.5, -2), 40)
@@ -408,6 +446,8 @@ func _on_chapter_complete() -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.chapter_end("completed")
+	# v0.7.0: SLEEPY as the scene fades toward the flight transition.
+	MarigoldCharacterRig.set_all_expressions("SLEEPY", 1.5)
 	_mark_completed(_chapter_index)
 	var next_idx := _chapter_index + 1
 	if next_idx < 0 or next_idx >= CHAPTERS.size():
@@ -417,16 +457,45 @@ func _on_chapter_complete() -> void:
 	var to_name := String(CHAPTERS[next_idx]["name"])
 	_current_chapter.queue_free()
 	_current_chapter = null
+	# v0.7.0 Comfort: flight mode (Full/Short/Skip) from settings.
+	var flight_dur := MarigoldGfx.flight_duration()
+	if MarigoldGfx.flight_mode() == "skip":
+		# Skip: 1s fade out, 1s fade in at destination (no town motion).
+		_do_flight_skip(next_idx)
+		return
 	var flight := MarigoldFlight.new()
 	flight.finished.connect(_on_flight_done.bind(next_idx))
-	flight.begin(self, from_name, to_name, 16.0)
+	flight.begin(self, from_name, to_name, flight_dur)
+
+
+## v0.7.0 Comfort: Skip mode — fade out/in without the flight.
+func _do_flight_skip(next_idx: int) -> void:
+	# Fade to black.
+	var fade := ColorRect.new()
+	fade.color = Color(0, 0, 0, 0)
+	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Add to UI layer.
+	var ui := get_node_or_null("UI")
+	if ui != null:
+		ui.add_child(fade)
+	else:
+		add_child(fade)
+	var tw := create_tween()
+	tw.tween_property(fade, "color:a", 1.0, 1.0)
+	tw.tween_callback(func() -> void:
+		_load_chapter(next_idx, "complete", true)
+		var tw2 := create_tween()
+		tw2.tween_property(fade, "color:a", 0.0, 1.0)
+		tw2.tween_callback(fade.queue_free))
 
 
 func _on_flight_done(next_idx: int) -> void:
 	for c in get_children():
 		if c is MarigoldFlight:
 			c.queue_free()
-	_load_chapter(next_idx, "complete")
+	# v0.7.0: the flight's arrival beat ends in a music crossfade into the
+	# next chapter's mood (no hard cut).
+	_load_chapter(next_idx, "complete", true)
 
 
 ## ---- Journey progress (Continue Journey, v0.5.0) ----

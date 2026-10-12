@@ -60,6 +60,7 @@ var _leader_rig: MarigoldCharacterRig = null
 var _band: Array = []
 var _ofrenda_shelf: Node3D = null
 var _teleport_pads: Array = []
+var _leader_anticip := 0.0 # v0.7.0: 150 ms anticipation before the hello move
 var _finale_locked := false
 
 var _phase := "intro" # intro, demo, do, cheer, finale, done
@@ -95,6 +96,10 @@ var _wind_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": fl
 
 ## ---- Chapter contract ----
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+var _vista: Node3D = null # v0.7.0 large-scale world vista
+
+
 func setup(ar_mode: bool) -> void:
 	if _built:
 		apply_mode(ar_mode)
@@ -114,8 +119,19 @@ func setup(ar_mode: bool) -> void:
 	# Ambient life pass (v0.5.0): butterflies + horizon spirits like ch1/ch2.
 	MarigoldAmbient.add_butterflies(self, Vector3(0, 1.8, -4), 8, 6.0)
 	MarigoldAmbient.add_spirits(self, 5, 16.0)
+	# v0.7.0: large-scale world vista (wade's order) — fiesta skyline.
+	if not ar_mode:
+		_vista = MarigoldVista.build(self, "fiesta", 60.0)
 	apply_mode(ar_mode)
 
+	# v0.7.0 Animator: lock the chapter's sky grade (magic-hour scripting).
+	if MarigoldSky.instance != null:
+		MarigoldSky.instance.lock_chapter_grade("ch5")
+	MarigoldAmbient.add_embers(self, 4.0, 24) # v0.7.0 Animator: brazier embers
+	MarigoldAmbient.add_petals(self, Vector3(0, 3.0, 0), 24, 6.0) # v0.7.0 Animator: celebration petals
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, _world)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -341,12 +357,76 @@ func _build_crowd() -> void:
 		# 3 dancers get the leader's sombrero treatment (v0.6.0 variety).
 		if i % 3 == 0:
 			_add_sombrero(d["body"], accent)
+		# v0.7.0 P2: two-tone sash — a second thinner band in a contrasting
+		# tone over the troupe's accent sash (weave pattern, not hue-only).
+		_add_sash2(d["body"], accent)
+		# v0.7.0 P2: 2 dancers get a re-posed guitar prop.
+		if i == 1 or i == 4:
+			_add_crowd_guitar(d["body"], accent)
 		_dancers.append({
 			"root": root, "body": d["body"], "rig": d.get("rig"),
 			"arm_l": d.get("arm_l"), "arm_r": d.get("arm_r"),
 			"phase": _rng.randf() * TAU, "speed": _rng.randf_range(1.6, 2.4),
 			"style": i % 3, "base_y": STAGE_TOP_Y, "base_rot": base_rot,
 		})
+
+
+## Second sash band in a contrasting tone (model-space: body is scaled
+## 2.64x). Two-tone weave instead of hue-only variety.
+func _add_sash2(body: Node3D, accent: Color) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	var tone := accent.darkened(0.45).lerp(Color(1.0, 0.93, 0.80), 0.25)
+	var sash := MeshInstance3D.new()
+	var sm := TorusMesh.new()
+	sm.inner_radius = 0.10
+	sm.outer_radius = 0.125
+	sm.rings = 20
+	sm.ring_segments = 8
+	sash.mesh = sm
+	sash.material_override = MarigoldFX.pbr(tone, 0.0, 0.6)
+	sash.position = Vector3(0, 0.43, 0)
+	sash.rotation_degrees.x = -8.0
+	body.add_child(sash)
+
+
+## Re-posed guitar prop for crowd dancers (model-space, at the hip).
+func _add_crowd_guitar(body: Node3D, accent: Color) -> void:
+	if body == null or not is_instance_valid(body):
+		return
+	var g := Node3D.new()
+	g.name = "CrowdGuitar"
+	var wood := MarigoldFX.pbr(Color(0.50, 0.26, 0.10), 0.1, 0.5)
+	var b := MeshInstance3D.new()
+	var bm := CylinderMesh.new()
+	bm.top_radius = 0.16
+	bm.bottom_radius = 0.20
+	bm.height = 0.10
+	bm.radial_segments = 16
+	b.mesh = bm
+	b.material_override = wood
+	b.rotation_degrees.x = 90.0
+	g.add_child(b)
+	var nk := MeshInstance3D.new()
+	var nm := BoxMesh.new()
+	nm.size = Vector3(0.05, 0.45, 0.05)
+	nk.mesh = nm
+	nk.material_override = wood
+	nk.position = Vector3(0, 0.28, 0)
+	g.add_child(nk)
+	var trim := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.16
+	tm.outer_radius = 0.175
+	tm.rings = 16
+	tm.ring_segments = 6
+	trim.mesh = tm
+	trim.material_override = MarigoldFX.glow(accent, 1.2)
+	g.add_child(trim)
+	g.position = Vector3(0.22, 0.30, 0.10)
+	g.rotation.z = -0.45
+	g.rotation.y = 0.35
+	body.add_child(g)
 
 
 ## Small sombrero for crowd variety (model-space: body is scaled 2.64x).
@@ -443,7 +523,7 @@ func _build_band() -> void:
 	umb.position = Vector3(3.6, 0, -1.2)
 	_world.add_child(umb)
 	for i in 3:
-		var d := MarigoldBanda.make_musician(accents[i], i, 500 + i, {"pupils": false})
+		var d := MarigoldBanda.make_musician(accents[i], i, 500 + i)
 		var root: Node3D = d["root"]
 		root.position = Vector3(3.0 + float(i) * 0.65, 0, -1.2)
 		root.rotation.y = -0.5
@@ -769,6 +849,7 @@ func _make_skeleton(accent: Color, dancer_scale: float, is_leader: bool, seed: i
 ## ---- Game flow ----
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	if not _built or _world == null:
 		return
 	_t += delta
@@ -819,6 +900,10 @@ func _start_move(i: int) -> void:
 	_leader_lean_target = mv["lean"]
 	_label_move.text = mv["label"]
 	_label_hint.text = "Watch the leader..."
+	if i == 2: # "Wave hello!": crouch first, then wave (anticipation).
+		_leader_anticip = 0.15
+		# v0.7.0 Narrative: Nico's hello line.
+		MarigoldDialogue.say("nico_hello_01")
 	_progress_ring.visible = false
 
 
@@ -1093,6 +1178,14 @@ func _update_leader(delta: float) -> void:
 	var pulse := 0.0
 	if beat >= 0.0:
 		pulse = pow(1.0 - beat, 2.0)
+	if _leader_anticip > 0.0:
+		_leader_anticip = maxf(0.0, _leader_anticip - delta)
+		var ak := _leader_anticip / 0.15
+		_leader_body.scale = Vector3(1.0 + 0.07 * ak, 1.0 - 0.10 * ak, 1.0 + 0.07 * ak)
+		_leader_body.rotation.x = 0.14 * ak
+	else:
+		_leader_body.scale = Vector3.ONE
+		_leader_body.rotation.x = 0.0
 	_leader.position.y = STAGE_TOP_Y + 0.5 + pulse * 0.09 + absf(sin(_t * 2.2)) * 0.05
 	# Wave oscillation during the "Wave hello!" demo.
 	if _move_idx == 2 and (_phase == "demo" or _phase == "do"):

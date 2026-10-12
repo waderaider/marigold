@@ -61,6 +61,9 @@ var _wink_cd := 0.0
 var _head_roll := 0.0
 
 
+var _teleport: Dictionary = {} # v0.7.0 laser locomotion rig
+
+
 func setup(ar_mode: bool) -> void:
 	_build()
 	apply_mode(ar_mode)
@@ -68,6 +71,9 @@ func setup(ar_mode: bool) -> void:
 		MarigoldSky.instance.set_gentle_mode(true)
 	_find_trackers()
 
+	# v0.7.0: laser-pointer teleport locomotion (wade's order) —
+	# every chapter + experience. Pads (ch3/ch5) keep working.
+	_teleport = MarigoldTeleport.laser_begin(self, self)
 
 func apply_mode(on: bool) -> void:
 	_ar_mode = on
@@ -214,6 +220,7 @@ func _set_mode(mode: String, label: String) -> void:
 ## ---------------- per-frame ----------------
 
 func _process(delta: float) -> void:
+	MarigoldTeleport.laser_update(self, _teleport, delta)
 	_t += delta
 	_phase_t += delta
 	if _plaque and is_instance_valid(_plaque):
