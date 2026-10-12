@@ -100,6 +100,21 @@ Three wade-ordered ship-blockers + the specialist punch-list.
 - Export preset flips: body_tracking=1, render_model=1 (espejo + controller
   skins use both; was 0 since v0.6.2).
 
+## Spatial 3D audio (wade's permanent rule — fast-follow, NOT this build)
+- Audio Director's spatial pass is DONE and verified: Godot 4.7.2's built-in
+  3D audio server is the honest path (Meta XR Audio is NOT exposed by the
+  vendor plugin — verified via strings on both .so files). 18/18 headless
+  checks green. New `SpatialAudio` helper (scripts/shared/spatial_audio.gd)
+  in both projects: one line per sound, auto occlusion raycast + reverb
+  zones (7 presets). Full spec: ~/workspace/design/SPATIAL_AUDIO_V0110.md.
+- The per-title wiring (a `SpatialAudio` node per game/chapter + the spec's
+  call sites) ships as a FAST-FOLLOW — it landed after this build's CI run
+  started and spans 90+ titles. Always called "spatial 3D audio", never
+  Dolby/Atmos/HRTF.
+- QA ship-gate additions for the follow-up: eyes-closed direction check,
+  wall-muffle occlusion check, reverb zone-transition check, no-2D-regression
+  (UI/stingers/music stay 2D).
+
 ## Known limitations (next cycle)
 - Ch1 mirror bust is NOT wired to body joints (espejo is; ch1 is the gap).
 - Dialogue: 41/45 lines have triggers defined, only 4 wired.
