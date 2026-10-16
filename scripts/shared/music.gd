@@ -5,6 +5,10 @@
 extends Node
 class_name MarigoldMusic
 
+## Shared spatial-audio plumbing (preload, not global class_name, so this
+## file parse-checks standalone with --check-only).
+const SpatialAudio = preload("res://scripts/shared/spatial_audio.gd")
+
 const AUDIO_DIR := "res://assets/audio/"
 
 ## Beats per minute of each generated mood loop (from tools/make_music.py
@@ -259,6 +263,33 @@ func play_sfx(kind: String, volume_db: float = -6.0) -> void:
 	p.play()
 	p.finished.connect(p.queue_free)
 	_bump_energy(0.7)
+
+
+## ---- Spatial 3D audio (v0.7.0 — wade's permanent rule) ----
+## Positional one-shots through the shared SpatialAudio helper
+## (scripts/shared/spatial_audio.gd). Needs ONE SpatialAudio node in the
+## scene — builders add it at the chapter root; calls are safe no-ops
+## without it. All sounds get occlusion muffle + reverb zones for free.
+##   MarigoldState.music.play_spatial("bell_toll", bell_pos)  # rings behind you
+func play_spatial(kind: String, pos: Vector3, volume_db: float = -6.0) -> void:
+	SpatialAudio.play(kind, pos, 1.0, volume_db)
+	_bump_energy(0.5)
+
+
+## World-anchored ambience bed (waterfall at the ch2 falls, crowd around the
+## ch5 dance floor). Returns the 3D player — stop with SpatialAudio.stop_music(p).
+## Beds sit at -14 dB under the -6 dB music, same as the 2D play_ambience.
+func play_ambience_at(kind: String, pos: Vector3) -> AudioStreamPlayer3D:
+	if not kind in AMBIENCE_KINDS:
+		push_warning("[MarigoldMusic] unknown ambience: " + kind)
+		return null
+	var stream: AudioStreamWAV = load(AUDIO_DIR + kind + ".wav") as AudioStreamWAV
+	if stream == null:
+		push_warning("[MarigoldMusic] missing ambience: " + kind)
+		return null
+	var p := SpatialAudio.music_at(stream, pos, _amb_volume_db)
+	_bump_energy(0.3)
+	return p
 
 
 ## ---- Music energy envelope (v0.7.0) ----

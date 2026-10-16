@@ -98,22 +98,22 @@ jobs:
         run: |
           python3 tools/make_music.py
 
-      - name: Build Windows PC VR
+      - name: Build Windows PC
         run: |
           mkdir -p builds/Marigold-Windows
-          ./Godot_v4.7.2-stable_linux.x86_64 --headless --export-debug "MARIGOLD (Windows PC VR)" builds/Marigold-Windows/Marigold.exe
+          ./Godot_v4.7.2-stable_linux.x86_64 --headless --export-debug "MARIGOLD (Windows PC)" builds/Marigold-Windows/Marigold.exe
           ls -lh builds/Marigold-Windows/
 
       - name: Zip Windows build
         run: |
           cd builds/Marigold-Windows
-          zip -r ../Marigold-v0.7.0-windows.zip .
+          zip -r ../Marigold-v0.8.0-windows.zip .
           cd ../..
-          ls -lh builds/Marigold-v0.7.0-windows.zip
+          ls -lh builds/Marigold-v0.8.0-windows.zip
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4
         with:
           name: Marigold-Windows
-          path: builds/Marigold-v0.7.0-windows.zip
+          path: builds/Marigold-v0.8.0-windows.zip
           if-no-files-found: error

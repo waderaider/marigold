@@ -281,21 +281,35 @@ static func laser_update(node: Node, rig: Dictionary, delta: float) -> void:
 	rig["hit"] = hit
 	rig["valid"] = valid
 	_update_laser_visuals(rig, origin, dir, hit, valid, have_aim)
-	# Trigger edge (primary) / pinch edge (fallback when no controller live).
-	var trig := false
-	if InputMap.has_action("trigger_click") and Input.is_action_pressed("trigger_click"):
-		trig = true
-	var trig_edge := trig and not bool(rig["trig_was"])
-	rig["trig_was"] = trig
-	var pinched := false
-	if not have_aim or not _any_controller_live(node):
-		for h in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
-			if MarigoldHands.pinch_active(node, h):
-				pinched = true
-				break
-	var pinch_edge := pinched and not bool(rig["pinch_was"])
-	rig["pinch_was"] = pinched
-	if valid and float(rig["cool"]) <= 0.0 and (trig_edge or pinch_edge):
+	# v0.8.0 verb split (wade's order): in PC mode the ONLY confirm is the
+	# teleport_confirm action (RMB). The pinch fallback is XR-only — on PC,
+	# LMB is the interact verb, so letting it confirm would double-fire
+	# (click a candle = light it AND teleport).
+	var st: Node = node.get_node_or_null("/root/MarigoldState")
+	var pc := st != null and st.has_method("is_pc_mode") \
+			and bool(st.call("is_pc_mode"))
+	var confirm := false
+	if pc:
+		if InputMap.has_action("teleport_confirm") \
+				and Input.is_action_just_pressed("teleport_confirm"):
+			confirm = true
+	else:
+		# Trigger edge (primary) / pinch edge (fallback when no controller live).
+		var trig := false
+		if InputMap.has_action("trigger_click") and Input.is_action_pressed("trigger_click"):
+			trig = true
+		var trig_edge := trig and not bool(rig["trig_was"])
+		rig["trig_was"] = trig
+		var pinched := false
+		if not have_aim or not _any_controller_live(node):
+			for h in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+				if MarigoldHands.pinch_active(node, h):
+					pinched = true
+					break
+		var pinch_edge := pinched and not bool(rig["pinch_was"])
+		rig["pinch_was"] = pinched
+		confirm = trig_edge or pinch_edge
+	if valid and float(rig["cool"]) <= 0.0 and confirm:
 		_do_laser_teleport(node, rig, hit)
 
 
@@ -313,8 +327,11 @@ static func _set_laser_visible(rig: Dictionary, v: bool) -> void:
 ## (controllers-only / hands-only) from Settings.
 static func _laser_aim(node: Node) -> Array:
 	var pref := MarigoldGfx.input_pref()
+	# v0.8.0 "mouse" preference: the desktop cursor is the aim source even
+	# when trackers are live (real behavior change, not a label).
+	var force_mouse := pref == "mouse"
 	# Controllers (raw tracker poses — independent of XRUIPointer).
-	if pref != "hands":
+	if pref != "hands" and not force_mouse:
 		var ctl := _live_controller(node, MarigoldGfx.dominant_hand_idx())
 		if ctl == null:
 			ctl = _live_controller(node, MarigoldHands.HAND_LEFT)
@@ -325,7 +342,7 @@ static func _laser_aim(node: Node) -> Array:
 			var d: Vector3 = -ctl.global_transform.basis.z.normalized()
 			return [o, d, true]
 	# Hands fallback (camera-anchored pointer ray).
-	if pref != "controllers" and MarigoldHands.is_xr_active():
+	if pref != "controllers" and not force_mouse and MarigoldHands.is_xr_active():
 		var r: Array = MarigoldHands.pointer_ray(node, MarigoldGfx.dominant_hand_idx())
 		return [r[0], (r[1] as Vector3).normalized(), true]
 	# Desktop: camera ray through the mouse.

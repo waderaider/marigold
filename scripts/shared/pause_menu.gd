@@ -17,6 +17,10 @@
 ## Chapters need ZERO changes: main.gd calls attach()/detach().
 extends Node3D
 
+## v0.8.0: emitted when the pause overlay opens/closes (main.gd uses it to
+## release/re-capture the mouse in PC mode).
+signal pause_toggled(open: bool)
+
 const EXIT_VP := Vector2i(160, 160)
 const EXIT_SIZE := Vector2(0.17, 0.17)
 ## v0.7.0 grid spec (UI_SPECIALIST_V0110 §1.3): 900x1000 viewport, 3-col
@@ -100,6 +104,9 @@ var _cards := {}
 var _page_settings: Control
 var _setting_value_btns := {}
 var _direct: DirectUIInput = null
+# v0.8.0: mode-switch note (restart required — shown under the rows).
+var _mode_note: Label = null
+var _mode_note_text := ""
 
 var _dwell_t := 0.0
 var _dwell_pos := Vector2.ZERO
@@ -125,8 +132,8 @@ func _process(delta: float) -> void:
 	var vp := get_viewport()
 	if vp != null:
 		xr = vp.use_xr
-	var hide_hands := MarigoldGfx.controllers_only()
-	var hide_ctl := MarigoldGfx.hands_only()
+	var hide_hands := MarigoldGfx.controllers_only() or MarigoldGfx.mouse_only()
+	var hide_ctl := MarigoldGfx.hands_only() or MarigoldGfx.mouse_only()
 	for p in _exit_pointers + _panel_pointers:
 		if is_instance_valid(p):
 			p.xr_mode = xr
@@ -257,6 +264,14 @@ func _open(via: String = "menu_hold") -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null:
 		gt.event("pause_open", {"chapter": gt.current_chapter(), "via": via})
+	# v0.8.0 honest gating: dim the Espejo card in PC mode (needs a
+	# headset). Applied at open — launch mode isn't known at _ready time.
+	if _cards.has("espejo"):
+		var ec := _cards["espejo"] as Button
+		if ec != null:
+			ec.modulate = Color(1, 1, 1, 0.45) \
+					if MarigoldState.is_pc_mode() else Color.WHITE
+	pause_toggled.emit(true)
 
 
 func _resume() -> void:
@@ -271,6 +286,7 @@ func _resume() -> void:
 	if _attached:
 		_exit_root.visible = true
 	MarigoldHaptics.confirm()
+	pause_toggled.emit(false)
 
 
 func _on_restart() -> void:
@@ -649,10 +665,32 @@ func _mark_current_card() -> void:
 		_style_card(_cards[key] as Button, key == _current_key)
 
 
-## Card press: current chapter = resume; anything else = direct jump through
-## the same load path as the launcher (autowiring, music, telemetry run
-## identically — main._on_pause_jump).
+## v0.8.0: flash a one-line note in the pause title (used for the Espejo
+## headset gate — the card stays, dimmed, with an explanation).
+var _note_tw: Tween = null
+
+
+func _flash_card_note(_key: String, msg: String) -> void:
+	if _title_label == null:
+		return
+	_title_label.text = msg
+	if _note_tw != null and _note_tw.is_valid():
+		_note_tw.kill()
+	_note_tw = create_tween()
+	_note_tw.tween_interval(2.5)
+	_note_tw.tween_callback(func() -> void:
+		if _title_label != null:
+			_title_label.text = "Pausa — " \
+					+ (_title_text if _title_text != "" else "La Plaza"))
 func _on_card(key: String) -> void:
+	## Card press: current chapter = resume; anything else = direct jump
+	## through the same load path as the launcher (autowiring, music,
+	## telemetry run identically — main._on_pause_jump).
+	# v0.8.0 honest gating: Espejo needs a headset (body tracking). The
+	# card stays visible but dimmed — no fake tracking, no silent launch.
+	if MarigoldState.is_pc_mode() and key == "espejo":
+		_flash_card_note(key, "Espejo needs a headset — switch Mode to VR in Settings, then restart.")
+		return
 	if key == _current_key:
 		_resume()
 		return
@@ -742,6 +780,29 @@ func _build_settings_page(vb: VBoxContainer) -> void:
 	_add_setting_row("dance", "Baile una mano · One-hand dance",
 			Callable(self, "_dance_label"),
 			Callable(self, "_cycle_setting_dance"))
+	# v0.8.0 PC mode rows (wade's order — all real, no placebos).
+	_add_setting_row("sens", "Sensibilidad · Mouse sensitivity",
+			Callable(self, "_sens_label"),
+			Callable(self, "_cycle_setting_sens"))
+	_add_setting_row("inverty", "Invertir Y · Invert mouse Y",
+			Callable(self, "_inverty_label"),
+			Callable(self, "_cycle_setting_inverty"))
+	_add_setting_row("fullscreen", "Pantalla completa · Fullscreen",
+			Callable(self, "_fullscreen_label"),
+			Callable(self, "_cycle_setting_fullscreen"))
+	_add_setting_row("resolution", "Resolución · Resolution",
+			Callable(self, "_resolution_label"),
+			Callable(self, "_cycle_setting_resolution"))
+	_add_setting_row("mode", "Modo · Mode (PC / VR)",
+			Callable(self, "_mode_label"),
+			Callable(self, "_cycle_setting_mode"))
+	_mode_note = Label.new()
+	_mode_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mode_note.add_theme_font_size_override("font_size", 26)
+	_mode_note.add_theme_color_override("font_color", C_MARIGOLD)
+	_mode_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mode_note.text = _mode_note_text
+	_page_settings.add_child(_mode_note)
 	var note := Label.new()
 	note.text = "Se aplica al instante · Applies instantly"
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -802,6 +863,62 @@ func _dance_label() -> String:
 
 func _cycle_setting_dance() -> void:
 	MarigoldGfx.set_dance_assist(not MarigoldGfx.dance_assist())
+	_refresh_settings_labels()
+
+
+## v0.8.0 PC rows (all real, no placebos).
+func _sens_label() -> String:
+	return "%.2f" % MarigoldGfx.mouse_sensitivity()
+
+
+func _cycle_setting_sens() -> void:
+	MarigoldGfx.cycle_mouse_sensitivity()
+	_refresh_settings_labels()
+
+
+func _inverty_label() -> String:
+	return "Sí" if MarigoldGfx.mouse_invert_y() else "No"
+
+
+func _cycle_setting_inverty() -> void:
+	MarigoldGfx.set_mouse_invert_y(not MarigoldGfx.mouse_invert_y())
+	_refresh_settings_labels()
+
+
+func _fullscreen_label() -> String:
+	return "Sí" if MarigoldGfx.fullscreen() else "No"
+
+
+func _cycle_setting_fullscreen() -> void:
+	MarigoldGfx.set_fullscreen(not MarigoldGfx.fullscreen())
+	_refresh_settings_labels()
+
+
+func _resolution_label() -> String:
+	return MarigoldGfx.resolution()
+
+
+func _cycle_setting_resolution() -> void:
+	MarigoldGfx.cycle_resolution()
+	_refresh_settings_labels()
+
+
+## Mode switch: persists the choice; takes effect on restart (XR can't
+## cleanly shut down mid-run, and PC->VR needs a fresh XR init — saying so
+## in the UI instead of pretending it's instant).
+func _mode_label() -> String:
+	var saved := MarigoldGfx.saved_launch_mode()
+	var cur := "pc" if MarigoldState.is_pc_mode() else "vr"
+	if saved != "" and saved != cur:
+		return "%s → %s (restart)" % [cur.to_upper(), saved.to_upper()]
+	return cur.to_upper()
+
+
+func _cycle_setting_mode() -> void:
+	var to := "vr" if MarigoldState.is_pc_mode() else "pc"
+	MarigoldGfx.save_launch_mode(to)
+	_mode_note_text = "Mode set to %s — restart the app to switch." \
+			% to.to_upper()
 	_refresh_settings_labels()
 
 func _refresh_settings_labels() -> void:
@@ -1071,7 +1188,12 @@ func _any_beam_drawn() -> bool:
 ## Gaze dwell fallback: when no beam is drawn by either path, a 1.2 s look
 ## = click. (Old rule used tracker registration — a live-but-useless
 ## tracker hid the reticle AND the lasers were invisible: zero input.)
+## v0.8.0: gated to XR — desktop never auto-clicks (see menu.gd).
 func _update_gaze(delta: float, viewport: SubViewport, quad: MeshInstance3D) -> void:
+	if not MarigoldHands.is_xr_active():
+		_dwell_t = 0.0
+		_dwell_ring.visible = false
+		return
 	if _menu_holding:
 		return  # the menu-hold ring owns _dwell_ring while the button is held
 	if _any_beam_drawn():

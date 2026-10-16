@@ -1552,15 +1552,30 @@ func _update_mirror(delta: float) -> void:
 	if bust != null and is_instance_valid(bust):
 		MarigoldCalavera.face_player(bust, _viva_cam_pos())
 	# Paint swatch pinch.
+	var pc := not MarigoldHands.is_xr_active()
+	var rorigin := Vector3.ZERO
+	var rdir := Vector3(0, 0, -1)
+	if pc:
+		var sray := _pointer_ray()
+		rorigin = sray[0]
+		rdir = sray[1]
 	for sw in _paint_swatches:
 		if sw == null or not is_instance_valid(sw):
 			continue
 		var touched := false
-		for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
-			if MarigoldHands.pinch_active(self, hand) \
-					and (sw as Node3D).global_position.distance_to(_pointer_pos()) < 0.22:
+		if pc:
+			# PC mode: click the swatch with the mouse ray — the y=1.0
+			# work-plane pointer never lands within 0.22 m of the low
+			# swatches (world y≈0.48), so the proximity test can't fire.
+			if MarigoldHands.pinch_active(self, MarigoldHands.HAND_RIGHT) \
+					and _ray_hit(rorigin, rdir, (sw as Node3D).global_position):
 				touched = true
-				break
+		else:
+			for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
+				if MarigoldHands.pinch_active(self, hand) \
+						and (sw as Node3D).global_position.distance_to(_pointer_pos()) < 0.22:
+					touched = true
+					break
 		if touched and int((sw as Node3D).get_meta("paint_idx")) != _paint_idx:
 			_apply_paint(int((sw as Node3D).get_meta("paint_idx")), true)
 
@@ -1629,9 +1644,22 @@ func _snap_photo() -> void:
 ## building doesn't also fire on those pinches).
 func _pointer_near_station() -> bool:
 	var p := _pointer_pos()
+	var pc := not MarigoldHands.is_xr_active()
+	var rorigin := Vector3.ZERO
+	var rdir := Vector3(0, 0, -1)
+	if pc:
+		var ray := _pointer_ray()
+		rorigin = ray[0]
+		rdir = ray[1]
 	for sw in _paint_swatches:
-		if sw != null and is_instance_valid(sw) \
-				and (sw as Node3D).global_position.distance_to(p) < 0.30:
+		if sw == null or not is_instance_valid(sw):
+			continue
+		if pc:
+			# Desktop: same ray test as the swatch pinch above, so the
+			# ofrenda-build suppression matches what the click can hit.
+			if _ray_hit(rorigin, rdir, (sw as Node3D).global_position):
+				return true
+		elif (sw as Node3D).global_position.distance_to(p) < 0.30:
 			return true
 	if _cam_prop != null and is_instance_valid(_cam_prop) and not _cam_held \
 			and _cam_prop.global_position.distance_to(p) < 0.35:

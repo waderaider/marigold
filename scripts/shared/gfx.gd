@@ -25,8 +25,8 @@ class_name MarigoldGfx
 
 const QUALITIES := ["low", "medium", "high", "ultra"]
 const QUALITY_LABEL := {"low": "Bajo", "medium": "Medio", "high": "Alto", "ultra": "Ultra"}
-const INPUT_PREFS := ["auto", "controllers", "hands"]
-const INPUT_LABEL := {"auto": "Auto", "controllers": "Controles", "hands": "Manos"}
+const INPUT_PREFS := ["auto", "controllers", "hands", "mouse"]
+const INPUT_LABEL := {"auto": "Auto", "controllers": "Controles", "hands": "Manos", "mouse": "Ratón"}
 const HANDS := ["right", "left"]
 const HAND_LABEL := {"right": "Derecha", "left": "Izquierda"}
 
@@ -276,6 +276,122 @@ static func controllers_only() -> bool:
 
 static func hands_only() -> bool:
 	return input_pref() == "hands"
+
+
+## v0.8.0: explicit mouse preference (PC mode). Beams from both XR paths
+## stay hidden — the cursor/teleport beam are the pointers.
+static func mouse_only() -> bool:
+	return input_pref() == "mouse"
+
+
+## ---- PC mode settings (v0.8.0, wade's order — all real, no placebos) ----
+
+## Mouse look sensitivity multiplier: 0.25 .. 3.0 (default 1.0).
+static func mouse_sensitivity() -> float:
+	return clampf(float(MarigoldSettings.get_value("controls", "mouse_sens", 1.0)),
+			0.25, 3.0)
+
+
+static func set_mouse_sensitivity(s: float) -> void:
+	MarigoldSettings.set_value("controls", "mouse_sens", clampf(s, 0.25, 3.0))
+
+
+static func cycle_mouse_sensitivity() -> float:
+	# Steps through 0.5 / 0.75 / 1.0 / 1.5 / 2.0 — lands on the nearest step
+	# above the current value.
+	var steps := [0.5, 0.75, 1.0, 1.5, 2.0]
+	var cur := mouse_sensitivity()
+	for s in steps:
+		if s > cur + 0.01:
+			set_mouse_sensitivity(s)
+			return s
+	set_mouse_sensitivity(steps[0])
+	return steps[0]
+
+
+## Invert mouse Y for look.
+static func mouse_invert_y() -> bool:
+	return bool(MarigoldSettings.get_value("controls", "invert_y", false))
+
+
+static func set_mouse_invert_y(on: bool) -> void:
+	MarigoldSettings.set_value("controls", "invert_y", on)
+
+
+## Fullscreen toggle (real: DisplayServer window mode).
+static func fullscreen() -> bool:
+	return bool(MarigoldSettings.get_value("display", "fullscreen", false))
+
+
+static func set_fullscreen(on: bool) -> void:
+	MarigoldSettings.set_value("display", "fullscreen", on)
+	_apply_window()
+
+
+## Window resolution for windowed mode (real: DisplayServer window size).
+## "native" = leave the OS default.
+const RESOLUTIONS := ["native", "1280x720", "1600x900", "1920x1080",
+		"2560x1440", "3840x2160"]
+
+
+static func resolution() -> String:
+	var r := str(MarigoldSettings.get_value("display", "resolution", "native"))
+	return r if RESOLUTIONS.has(r) else "native"
+
+
+static func set_resolution(r: String) -> void:
+	if not RESOLUTIONS.has(r):
+		return
+	MarigoldSettings.set_value("display", "resolution", r)
+	_apply_window()
+
+
+static func cycle_resolution() -> String:
+	var r := resolution()
+	set_resolution(RESOLUTIONS[(RESOLUTIONS.find(r) + 1) % RESOLUTIONS.size()])
+	return resolution()
+
+
+## Apply saved fullscreen + resolution at boot (called from _enter_pc_mode
+## and from the setters above).
+static func _apply_window() -> void:
+	if OS.has_feature("android"):
+		return # Quest: the OS owns the window
+	if fullscreen():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		var r := resolution()
+		if r != "native" and r.contains("x"):
+			var parts := r.split("x")
+			if parts.size() == 2 and parts[0].is_valid_int() \
+					and parts[1].is_valid_int():
+				DisplayServer.window_set_size(
+						Vector2i(int(parts[0]), int(parts[1])))
+
+
+static func apply_window_boot() -> void:
+	_apply_window()
+
+
+## Launch-mode persistence (v0.8.0 boot chooser). "pc" | "vr" | "" (unset).
+static func saved_launch_mode() -> String:
+	var m := str(MarigoldSettings.get_value("display", "mode", ""))
+	return m if m == "pc" or m == "vr" else ""
+
+
+static func save_launch_mode(m: String) -> void:
+	if m == "pc" or m == "vr":
+		MarigoldSettings.set_value("display", "mode", m)
+
+
+## PC onboarding dismissed flag (v0.8.0 first-run screen).
+static func pc_onboarded() -> bool:
+	return bool(MarigoldSettings.get_value("display", "pc_onboarded", false))
+
+
+static func set_pc_onboarded() -> void:
+	MarigoldSettings.set_value("display", "pc_onboarded", true)
 
 
 ## Dominant hand: which controller aims the teleport laser + the default

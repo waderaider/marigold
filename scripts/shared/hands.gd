@@ -25,15 +25,33 @@ static func is_xr_active() -> bool:
 	return xr != null and xr.is_initialized()
 
 
+## v0.8.0: shared PC-mode probe for the static helpers below. Resolves the
+## MarigoldState autoload at runtime (never at parse time, so headless
+## --check-only stays clean).
+static func _pc_mode_via(node: Node) -> bool:
+	if node == null:
+		return false
+	var st: Node = node.get_node_or_null("/root/MarigoldState")
+	return st != null and st.has_method("is_pc_mode") \
+			and bool(st.call("is_pc_mode"))
+
+
 ## Pinch detection.
 ## XR path: measures thumb-tip to index-tip distance via the hand tracker when
 ## the project exposes hand-tracking actions; falls back to mouse/trigger.
 ## `hand` is HAND_LEFT or HAND_RIGHT. `node` is used to find tracker nodes.
+## v0.8.0 verb split (wade's order): on PC, LMB = interact (right-hand
+## pinch) and RMB = teleport-confirm (owned by MarigoldTeleport) — so the
+## RMB->left-pinch mouse mapping is disabled in PC mode. Two-hand XR paths
+## are untouched.
 static func pinch_active(node: Node, hand: int = HAND_RIGHT) -> bool:
-	# Mouse fallback: left button = right-hand pinch, right button = left-hand pinch.
+	# Mouse fallback: left button = right-hand pinch (interact).
 	if hand == HAND_RIGHT and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		return true
-	if hand == HAND_LEFT and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+	# Right button = left-hand pinch everywhere EXCEPT PC mode, where RMB
+	# is the teleport-confirm verb.
+	if hand == HAND_LEFT and not _pc_mode_via(node) \
+			and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		return true
 	# XR action fallback (projects that map pinch to an action).
 	var action := "pinch_right" if hand == HAND_RIGHT else "pinch_left"
@@ -55,23 +73,42 @@ static func pinch_just_pressed(node: Node, hand: int = HAND_RIGHT) -> bool:
 
 
 ## Hand/pointer world position.
-## XR path would read the hand tracker; fallback is a point in front of camera.
+## XR path: point fixed to the camera (head-locked hand proxy), kept
+## byte-for-byte. Desktop path (v0.8.0): the mouse ray at 1.6 m — the same
+## model ch1/ch3/ch4/guitarra already use, so mano_magica, pinta and ch5
+## get a working cursor-hand for free.
 static func pointer_position(node: Node3D, hand: int = HAND_RIGHT, reach: float = 1.2) -> Vector3:
+	if is_xr_active():
+		var camx := node.get_viewport().get_camera_3d()
+		if camx == null:
+			return node.global_position + Vector3(0, 1.2, -reach)
+		var xoff := Vector3(0.18 if hand == HAND_RIGHT else -0.18, -0.12, 0.0)
+		return camx.global_transform * (Vector3(0, 0, -reach) + xoff)
 	var cam := node.get_viewport().get_camera_3d()
 	if cam == null:
 		return node.global_position + Vector3(0, 1.2, -reach)
-	var offset := Vector3(0.18 if hand == HAND_RIGHT else -0.18, -0.12, 0.0)
-	return cam.global_transform * (Vector3(0, 0, -reach) + offset)
+	var mp := node.get_viewport().get_mouse_position()
+	return cam.project_ray_origin(mp) + cam.project_ray_normal(mp) * 1.6
 
 
 ## Ray from the pointer for selection (origin, direction).
+## XR: camera-forward (unchanged). Desktop (v0.8.0): camera ray through the
+## mouse cursor — the unified aim model (UI Specialist).
 static func pointer_ray(node: Node3D, hand: int = HAND_RIGHT) -> Array:
+	if is_xr_active():
+		var camx := node.get_viewport().get_camera_3d()
+		var originx := pointer_position(node, hand)
+		var dirx := Vector3(0, 0, -1)
+		if camx != null:
+			dirx = -camx.global_transform.basis.z
+		return [originx, dirx.normalized()]
 	var cam := node.get_viewport().get_camera_3d()
-	var origin := pointer_position(node, hand)
-	var dir := Vector3(0, 0, -1)
-	if cam != null:
-		dir = -cam.global_transform.basis.z
-	return [origin, dir.normalized()]
+	if cam == null:
+		return [node.global_position + Vector3(0, 1.2, -1.6), Vector3(0, 0, -1)]
+	var mp := node.get_viewport().get_mouse_position()
+	var origin := cam.project_ray_origin(mp)
+	var dir := cam.project_ray_normal(mp).normalized()
+	return [origin, dir]
 
 
 ## Save an object's transform as a named spatial anchor (persists in user://).

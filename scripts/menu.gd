@@ -83,6 +83,12 @@ var _download_button: Button
 var _install_button: Button
 var _room_dialog: Control
 var _dwell_ring: MeshInstance3D
+# v0.8.0 PC reframing: VR-only rows hidden on desktop.
+var _room_button: Button = null
+var _conn_row: HBoxContainer = null
+var _hint_label: Label = null
+var _vr_hint_label: Label = null
+var _pc_framed := false
 
 var _chapter_names: Array = []
 var _experiences: Array = []
@@ -128,8 +134,9 @@ func _process(delta: float) -> void:
 	var xr := get_viewport().use_xr
 	# v0.7.0 Settings: input-method preference is real — the
 	# non-preferred path's beams stay hidden.
-	var hide_hands := MarigoldGfx.controllers_only()
-	var hide_ctl := MarigoldGfx.hands_only()
+	# v0.8.0: explicit "mouse" preference hides both XR beam paths.
+	var hide_hands := MarigoldGfx.controllers_only() or MarigoldGfx.mouse_only()
+	var hide_ctl := MarigoldGfx.hands_only() or MarigoldGfx.mouse_only()
 	for p in _pointers:
 		if is_instance_valid(p):
 			p.xr_mode = xr
@@ -147,7 +154,11 @@ func _process(delta: float) -> void:
 	# Panel framing guards.
 	if _panel_root != null and _panel_root.visible:
 		_guard_acc += delta
-		if _guard_acc >= GUARD_INTERVAL:
+		if MarigoldState.is_pc_mode():
+			# PC: smooth-follow the desktop camera instead of the
+			# 0.5 s snap-recenter (WASD would make the snaps jarring).
+			_track_panel_pc(delta)
+		elif _guard_acc >= GUARD_INTERVAL:
 			_guard_acc = 0.0
 			_auto_frame_panel()
 			_refresh_diag()
@@ -367,6 +378,7 @@ func _log_menu_open() -> void:
 		"controllers": _diag_controllers(),
 		"hands": _diag_hands(),
 		"xr": get_viewport().use_xr,
+		"mode": "pc" if MarigoldState.is_pc_mode() else "vr",
 		"headset": _headset_model(),
 	})
 	gt.flush()
@@ -578,6 +590,7 @@ func _build_ui() -> void:
 	room.custom_minimum_size = Vector2(0, 96)
 	room.pressed.connect(_show_room_dialog)
 	btn_row.add_child(room)
+	_room_button = room # v0.8.0: hidden in PC mode (VR-only row)
 
 	_download_button = _make_button("Download", 34, C_ACCENT)
 	_download_button.visible = false
@@ -597,6 +610,7 @@ func _build_ui() -> void:
 	conn_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	conn_row.add_theme_constant_override("separation", 16)
 	_menu_panel.add_child(conn_row)
+	_conn_row = conn_row # v0.8.0: hidden in PC mode (VR-only row)
 	_test_button = _make_button("Test connection", 28, C_DIM)
 	_test_button.custom_minimum_size = Vector2(0, 72)
 	_test_button.pressed.connect(_test_connection)
@@ -607,8 +621,12 @@ func _build_ui() -> void:
 	_conn_label.add_theme_color_override("font_color", C_DIM)
 	conn_row.add_child(_conn_label)
 
-	_add_label(_menu_panel, "Point the laser and pull the trigger (or pinch) to select",
+	_vr_hint_label = _add_label(_menu_panel, "Point the laser and pull the trigger (or pinch) to select",
 			24, C_DIM)
+	_hint_label = _add_label(_menu_panel,
+			"Click to select · WASD move · Mouse look · Right-click teleport · Esc pause",
+			24, C_DIM)
+	_hint_label.visible = false # v0.8.0: PC hint, shown by _apply_pc_framing
 
 	_ping_http = HTTPRequest.new()
 	_ping_http.name = "DiagPingHTTP"
@@ -622,6 +640,30 @@ func _build_ui() -> void:
 	_list_built = true
 	_rebuild_list()
 	_refresh_diag()
+	_apply_pc_framing()
+
+
+## v0.8.0 PC reframing (wade's order): keep the 3D quads (no CanvasLayer
+## refactor), but make the panel read on a monitor — closer-relative scale,
+## PC hint line, VR-only rows stripped (Room setup, input diagnostics,
+## Test connection). Same Control trees, same click funnel.
+func _apply_pc_framing() -> void:
+	if _pc_framed:
+		return
+	_pc_framed = true
+	if not MarigoldState.is_pc_mode():
+		return
+	_panel_root.scale = Vector3.ONE * 1.35
+	if _room_button != null:
+		_room_button.visible = false
+	if _conn_row != null:
+		_conn_row.visible = false
+	if _diag_label != null:
+		_diag_label.visible = false
+	if _vr_hint_label != null:
+		_vr_hint_label.visible = false
+	if _hint_label != null:
+		_hint_label.visible = true
 
 
 func _rebuild_list() -> void:
@@ -651,13 +693,26 @@ func _rebuild_list() -> void:
 		var info := _find_experience(key)
 		if info.is_empty():
 			continue
-		var row := _make_row(String(info.get("name", "Experience")),
-				String(info.get("desc", "")))
 		var k := String(info.get("key", key))
-		row.pressed.connect(func() -> void:
-			if MarigoldState.music != null:
-				MarigoldState.music.chime(72) # v0.7.0 UI chime
-			experience_chosen.emit(k))
+		# v0.8.0 honest gating (Design Director): Espejo needs body
+		# tracking — a headset. Dimmed, not removed; no fake tracking.
+		var gated := MarigoldState.is_pc_mode() and k == "espejo"
+		var row_name := String(info.get("name", "Experience"))
+		var row_desc := String(info.get("desc", ""))
+		if gated:
+			row_name = "Espejo — needs a headset"
+			row_desc = "Body-tracked mirror dance. Switch to VR mode in Settings."
+		var row := _make_row(row_name, row_desc)
+		if gated:
+			row.modulate = Color(1, 1, 1, 0.45)
+			row.pressed.connect(func() -> void:
+				set_status("Espejo needs a headset — open Settings (Esc) " \
+						+ "and switch Mode to VR, then restart."))
+		else:
+			row.pressed.connect(func() -> void:
+				if MarigoldState.music != null:
+					MarigoldState.music.chime(72) # v0.7.0 UI chime
+				experience_chosen.emit(k))
 		_list_vbox.add_child(row)
 
 
@@ -892,6 +947,29 @@ func _recenter_panel() -> void:
 	_panel_root.rotation = Vector3(0, atan2(to_user.x, to_user.z), 0)
 
 
+## v0.8.0: PC panel tracking — smooth-follow the desktop camera so the
+## menu stays framed while WASD-moving. Never snaps (the VR guard's snap
+## is skipped in PC mode).
+func _track_panel_pc(delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null or not is_instance_valid(cam):
+		return
+	var fwd := -cam.global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.001:
+		fwd = Vector3(0, 0, -1)
+	else:
+		fwd = fwd.normalized()
+	var target := cam.global_position + fwd * PANEL_DISTANCE
+	target.y = clampf(cam.global_position.y, 1.1, 1.75)
+	var k := 1.0 - exp(-6.0 * delta)
+	_panel_root.global_position = _panel_root.global_position.lerp(target, k)
+	var to_user := cam.global_position - _panel_root.global_position
+	if to_user.length_squared() > 0.001:
+		var want_yaw := atan2(to_user.x, to_user.z)
+		_panel_root.rotation.y = lerp_angle(_panel_root.rotation.y, want_yaw, k)
+
+
 ## 0.5 s guard tick: push away when too close, recenter when off-axis.
 func _auto_frame_panel() -> void:
 	var cam := get_viewport().get_camera_3d()
@@ -1046,7 +1124,14 @@ func _forward_desktop_mouse(event: InputEventMouse) -> void:
 
 
 ## Gaze dwell fallback: runs only when no beam is drawn by either path.
+## v0.8.0: gated to XR — on desktop the camera-forward "gaze" point sits
+## wherever the player last looked, and a 1.2 s dwell would auto-click
+## buttons the mouse never touched (latent desktop auto-click bug).
 func _update_gaze(delta: float) -> void:
+	if not MarigoldHands.is_xr_active():
+		_dwell_t = 0.0
+		_dwell_ring.visible = false
+		return
 	if _room_dialog != null and _room_dialog.visible:
 		_dwell_t = 0.0
 		_dwell_ring.visible = false

@@ -720,6 +720,22 @@ func _update_teleport_pads(delta: float) -> void:
 		if _ar_mode:
 			continue
 		MarigoldTeleport.pulse_pad(pad, _t)
+		if not MarigoldHands.is_xr_active():
+			# PC mode (v0.8.0): RMB clicks the pad — the mouse ray passing
+			# within 0.55 m of it. Hand-proximity (XR path below) is
+			# unreachable on desktop with the cursor riding the ray.
+			if InputMap.has_action("teleport_confirm") \
+					and Input.is_action_just_pressed("teleport_confirm") \
+					and _pad_ray_within(pad, 0.55):
+				var g: Dictionary = _guides[int(p["guide"])]
+				var gp: Vector3 = (g["node"] as Node3D).global_position
+				var to_c: Vector3 = (Vector3(0, 0, -1.0) - gp)
+				to_c.y = 0.0
+				var target: Vector3 = gp + to_c.normalized() * 1.4
+				target.y = 0.0
+				if MarigoldTeleport.begin(self, self, target):
+					_status_label.text = "¡Vamos a %s!" % String((g["def"] as Dictionary)["name"])
+			continue
 		for hand in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
 			if MarigoldHands.pinch_active(self, hand) \
 					and pad.global_position.distance_to(_hand_point(hand)) < 0.45:
@@ -732,6 +748,18 @@ func _update_teleport_pads(delta: float) -> void:
 				if MarigoldTeleport.begin(self, self, target):
 					_status_label.text = "¡Vamos a %s!" % String((g["def"] as Dictionary)["name"])
 				break
+
+
+## PC mode: true when the mouse ray passes within `tol` meters of the pad.
+func _pad_ray_within(pad: Node3D, tol: float) -> bool:
+	var ray: Array = _hand_ray(MarigoldHands.HAND_RIGHT)
+	var origin: Vector3 = ray[0]
+	var dir: Vector3 = ray[1]
+	var to_p: Vector3 = pad.global_position - origin
+	var along := to_p.dot(dir)
+	if along < 0.0:
+		return false
+	return (to_p - dir * along).length() < tol
 
 
 ## Scrolling fountain ripple rings (v0.6.0 art punch-list): 3 expanding +
@@ -1481,6 +1509,9 @@ func _hand_ray(hand: int) -> Array:
 func _update_feeding() -> void:
 	if _celebrating:
 		return
+	if not MarigoldHands.is_xr_active():
+		_update_feeding_pc()
+		return
 	for h in [MarigoldHands.HAND_LEFT, MarigoldHands.HAND_RIGHT]:
 		var pinching: bool = MarigoldHands.pinch_active(self, h)
 		var ppos: Vector3 = _hand_point(h)
@@ -1508,6 +1539,42 @@ func _update_feeding() -> void:
 					_feed_guide(aimed, orb)
 				else:
 					_fizzle_orb(orb)
+
+
+## PC mode (v0.8.0): click-to-spawn feeding. The proximity spawn above can
+## never fire on desktop — the cursor rides the mouse ray at 1.6 m while
+## guides sit 3+ m out — so an LMB click aimed at a guide spawns the orb
+## at the cursor instead. Hold carries the orb; release throws it at the
+## aimed guide (same carry/throw path as XR).
+func _update_feeding_pc() -> void:
+	var h := MarigoldHands.HAND_RIGHT
+	var pinching: bool = MarigoldHands.pinch_active(self, h)
+	var ppos: Vector3 = _hand_point(h)
+	if MarigoldHands.pinch_just_pressed(self, h) and not _orbs.has(h):
+		var ray: Array = _hand_ray(h)
+		var target: Variant = _aimed_guide(ray[0], ray[1])
+		if target != null:
+			# v0.6.0: first approach to a guide triggers its greeting.
+			if _greeted != target:
+				_greet_guide(target)
+			var orb := _make_orb()
+			orb.global_position = ppos
+			add_child(orb)
+			_orbs[h] = orb
+			if MarigoldState.music != null:
+				MarigoldState.music.pluck(76, 0.35, 0.6)
+	if _orbs.has(h):
+		var orb: Node3D = _orbs[h]
+		if pinching:
+			orb.global_position = ppos
+		else:
+			_orbs.erase(h)
+			var ray: Array = _hand_ray(h)
+			var aimed: Variant = _aimed_guide(ray[0], ray[1])
+			if aimed != null:
+				_feed_guide(aimed, orb)
+			else:
+				_fizzle_orb(orb)
 
 
 func _make_orb() -> Node3D:

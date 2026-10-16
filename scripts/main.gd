@@ -54,6 +54,12 @@ var _xr: OpenXRInterface = null
 var _current_kind := "" # "chapter" | "exp" - for pause restart
 var _current_exp_key := ""
 var _music: MarigoldMusic = null
+# v0.8.0 PC mode (wade's order): the desktop camera rig + boot chooser.
+# NOTE: the rig script is load()ed, not referenced by class_name — the
+# global class cache is only rebuilt by the editor, and a stale cache
+# would hard-break boot. load() always resolves.
+var _pc_rig: Node3D = null
+var _chooser: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -62,19 +68,294 @@ func _ready() -> void:
 	_chapter_root.name = "ChapterRoot"
 	add_child(_chapter_root)
 
-	# XR init FIRST: the compositor needs it, and everything after it is
-	# staged so frame 1 stays fast.
+	# v0.8.0: mode is chosen BEFORE anything camera/XR related.
+	# Order: CLI --pc/--vr > persisted display/mode > first-run chooser
+	# (Windows only; the Quest APK is always VR).
+	var mode := _resolve_launch_mode()
+	if mode == MarigoldState.LaunchMode.UNSET:
+		_show_boot_chooser()
+	else:
+		_enter_mode(mode)
+
+
+## Resolve the launch mode without initializing XR.
+func _resolve_launch_mode() -> int:
+	if OS.has_feature("android"):
+		return MarigoldState.LaunchMode.VR # Quest APK always VR
+	var args := OS.get_cmdline_args()
+	args.append_array(OS.get_cmdline_user_args())
+	for a in args:
+		var s := String(a).to_lower()
+		if s == "--pc":
+			return MarigoldState.LaunchMode.PC
+		if s == "--vr":
+			return MarigoldState.LaunchMode.VR
+	match MarigoldGfx.saved_launch_mode():
+		"pc":
+			return MarigoldState.LaunchMode.PC
+		"vr":
+			return MarigoldState.LaunchMode.VR
+	return MarigoldState.LaunchMode.UNSET
+
+
+## Enter the chosen mode, then build the menu. XR initializes ONLY in VR
+## mode (v0.8.0 fix: the old unconditional init let SteamVR/VD claim the
+## runtime on wade's PC with no headset worn).
+func _enter_mode(mode: int) -> void:
+	MarigoldState.launch_mode = mode
+	if mode == MarigoldState.LaunchMode.VR:
+		if not _enter_vr_mode():
+			# Persisted VR + no headset: back to the chooser with a
+			# warning. Never hang, never boot-loop.
+			MarigoldState.launch_mode = MarigoldState.LaunchMode.UNSET
+			_show_boot_chooser("No headset found. Connect your Quest via " \
+					+ "Virtual Desktop — or play on PC.")
+			return
+	else:
+		_enter_pc_mode()
+	_build_menu()
+	_wire_pause_capture()
+	call_deferred("_stage2")
+	if mode == MarigoldState.LaunchMode.PC and not MarigoldGfx.pc_onboarded():
+		call_deferred("_show_pc_onboarding")
+
+
+## VR entry: the old _ready() XR block, now mode-gated but otherwise the
+## same code (VR path byte-for-byte).
+func _enter_vr_mode() -> bool:
 	_xr = XRServer.find_interface("OpenXR")
-	if _xr and _xr.initialize():
+	if _xr != null and _xr.initialize():
 		get_viewport().use_xr = true
 		$XROrigin3D/XRCamera3D.current = true
-	else:
-		_xr = null
-		push_warning("[MARIGOLD] OpenXR unavailable - desktop fallback")
+		MarigoldGfx.save_launch_mode("vr")
+		return true
+	_xr = null
+	if OS.has_feature("android"):
+		# Quest: keep the historical safe fallback.
+		push_warning("[MARIGOLD] OpenXR unavailable on Android - desktop fallback")
 		$DesktopCamera.current = true
+		return true
+	return false
 
-	_build_menu()
-	call_deferred("_stage2")
+
+## PC entry: desktop camera, FPS rig, Ultra default, saved window prefs.
+func _enter_pc_mode() -> void:
+	get_viewport().use_xr = false
+	$DesktopCamera.current = true
+	MarigoldGfx.save_launch_mode("pc")
+	MarigoldGfx.apply_window_boot()
+	# First PC boot defaults to Ultra (RTX 5070 Ti) — never overrides a
+	# saved choice.
+	if MarigoldSettings.get_value("gfx", "quality", null) == null:
+		MarigoldGfx.set_quality("ultra")
+	_pc_rig = (load("res://scripts/shared/pc_camera.gd") as Script).new()
+	_pc_rig.name = "PCCameraRig"
+	add_child(_pc_rig)
+	_pc_rig.call("attach", $DesktopCamera)
+	_release_mouse() # menus need the cursor
+
+
+## ---- boot chooser (Windows only; Quest goes straight to VR) ----
+
+## Screen-space 2D overlay (CanvasLayer — renders before any camera is
+## chosen). Two choices; the pick persists in display/mode.
+func _show_boot_chooser(warn: String = "") -> void:
+	_release_mouse()
+	if _chooser != null and is_instance_valid(_chooser):
+		_chooser.queue_free()
+	var layer := CanvasLayer.new()
+	layer.layer = 20
+	layer.name = "BootChooser"
+	add_child(layer)
+	_chooser = layer
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(root)
+	var bg := ColorRect.new()
+	bg.color = Color(0.106, 0.059, 0.118)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(center)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 28)
+	center.add_child(vb)
+	var title := Label.new()
+	title.text = "MARIGOLD — built by Muse"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_color_override("font_color", Color(1.0, 0.62, 0.106))
+	vb.add_child(title)
+	var sub := Label.new()
+	sub.text = "A Dia de Muertos Journey"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 36)
+	sub.add_theme_color_override("font_color", Color(1.0, 0.965, 0.910))
+	vb.add_child(sub)
+	if warn != "":
+		var w := Label.new()
+		w.text = warn
+		w.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		w.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		w.custom_minimum_size = Vector2(700, 0)
+		w.add_theme_font_size_override("font_size", 30)
+		w.add_theme_color_override("font_color", Color(1.0, 0.45, 0.35))
+		vb.add_child(w)
+	var pc_btn := _chooser_button("🖥   Play on PC",
+			"Mouse + keyboard on your monitor")
+	pc_btn.pressed.connect(_on_chooser_pick.bind(MarigoldState.LaunchMode.PC))
+	vb.add_child(pc_btn)
+	var vr_btn := _chooser_button("🥽   Play in VR",
+			"Quest via Virtual Desktop")
+	vr_btn.pressed.connect(_on_chooser_pick.bind(MarigoldState.LaunchMode.VR))
+	vb.add_child(vr_btn)
+	var ver := Label.new()
+	ver.text = "v" + str(ProjectSettings.get_setting(
+			"application/config/version", "0.0.0"))
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ver.add_theme_font_size_override("font_size", 26)
+	ver.add_theme_color_override("font_color", Color(0.847, 0.749, 0.659))
+	vb.add_child(ver)
+
+
+func _chooser_button(main_text: String, sub_text: String) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(640, 130)
+	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.165, 0.086, 0.149)
+	normal.border_color = Color(1.0, 0.62, 0.106)
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(18)
+	normal.content_margin_left = 32
+	normal.content_margin_right = 32
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(1.0, 0.62, 0.106)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	b.add_child(vb)
+	var l1 := Label.new()
+	l1.text = main_text
+	l1.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l1.add_theme_font_size_override("font_size", 44)
+	l1.add_theme_color_override("font_color", Color(1.0, 0.965, 0.910))
+	l1.add_theme_color_override("font_hover_color", Color(0.106, 0.059, 0.118))
+	l1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(l1)
+	var l2 := Label.new()
+	l2.text = sub_text
+	l2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l2.add_theme_font_size_override("font_size", 26)
+	l2.add_theme_color_override("font_color", Color(0.847, 0.749, 0.659))
+	l2.add_theme_color_override("font_hover_color", Color(0.106, 0.059, 0.118))
+	l2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(l2)
+	return b
+
+
+func _on_chooser_pick(mode: int) -> void:
+	if _chooser != null and is_instance_valid(_chooser):
+		_chooser.queue_free()
+		_chooser = null
+	_enter_mode(mode)
+
+
+## ---- PC first-run onboarding (v0.8.0) ----
+
+## One screen, shown once: the whole control scheme. Click to dismiss.
+func _show_pc_onboarding() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 21
+	layer.name = "PCOnboarding"
+	add_child(layer)
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(root)
+	var dim := ColorRect.new()
+	dim.color = Color(0.05, 0.02, 0.06, 0.88)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(760, 0)
+	var ps := StyleBoxFlat.new()
+	ps.bg_color = Color(0.165, 0.086, 0.149)
+	ps.border_color = Color(1.0, 0.62, 0.106)
+	ps.set_border_width_all(4)
+	ps.set_corner_radius_all(20)
+	ps.content_margin_left = 56
+	ps.content_margin_right = 56
+	ps.content_margin_top = 44
+	ps.content_margin_bottom = 44
+	panel.add_theme_stylebox_override("panel", ps)
+	center.add_child(panel)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 18)
+	panel.add_child(vb)
+	var head := Label.new()
+	head.text = "Playing on PC"
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	head.add_theme_font_size_override("font_size", 56)
+	head.add_theme_color_override("font_color", Color(1.0, 0.62, 0.106))
+	vb.add_child(head)
+	var lines := Label.new()
+	lines.text = "WASD / arrows — move\nMouse — look around\nClick — interact (light candles, grab, paint)\nRight-click — teleport where the petal ring lands\nShift — sprint · Esc — pause menu"
+	lines.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lines.add_theme_font_size_override("font_size", 34)
+	lines.add_theme_color_override("font_color", Color(1.0, 0.965, 0.910))
+	vb.add_child(lines)
+	var go := Button.new()
+	go.text = "Click to begin  ✓"
+	go.custom_minimum_size = Vector2(0, 96)
+	go.add_theme_font_size_override("font_size", 38)
+	var gs := StyleBoxFlat.new()
+	gs.bg_color = Color(1.0, 0.62, 0.106)
+	gs.set_corner_radius_all(14)
+	go.add_theme_stylebox_override("normal", gs)
+	go.add_theme_color_override("font_color", Color(0.106, 0.059, 0.118))
+	vb.add_child(go)
+	go.pressed.connect(func() -> void:
+		MarigoldGfx.set_pc_onboarded()
+		layer.queue_free())
+
+
+## ---- mouse capture (PC mode) ----
+
+func _capture_mouse() -> void:
+	if MarigoldState.is_pc_mode() and _pc_rig != null:
+		_pc_rig.set("active", true)
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _release_mouse() -> void:
+	if _pc_rig != null:
+		_pc_rig.set("active", false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _wire_pause_capture() -> void:
+	if not MarigoldPause.pause_toggled.is_connected(_on_pause_toggled):
+		MarigoldPause.pause_toggled.connect(_on_pause_toggled)
+
+
+## Esc opens pause -> cursor back; resume -> captured again.
+func _on_pause_toggled(open: bool) -> void:
+	if not MarigoldState.is_pc_mode():
+		return
+	if open:
+		_release_mouse()
+	else:
+		_capture_mouse()
 
 
 ## Stage 2 (deferred, after first frame): music node (streams lazy-load on
@@ -213,6 +494,7 @@ func _load_experience(key: String, via: String = "menu") -> void:
 	_current_kind = "exp"
 	_current_exp_key = key
 	_wire_pause_and_skins(key, String(info["name"]))
+	_capture_mouse() # PC mode: chapters own the mouse
 
 
 func _on_experience_complete() -> void:
@@ -341,6 +623,7 @@ func _quit_to_menu() -> void:
 	if _sky != null and is_instance_valid(_sky):
 		_sky.set_gentle_mode(false) # experiences may have requested gentle weather
 	MarigoldPause.detach()
+	_release_mouse() # cursor back for the menu
 	_menu.show_menu()
 
 
@@ -438,6 +721,7 @@ func _load_chapter(idx: int, via: String = "menu", xfade: bool = false) -> void:
 	_current_kind = "chapter"
 	_wire_pause_and_skins(String(info["key"]), String(info["name"]))
 	MarigoldFX.scatter_petals(_chapter_root, Vector3(0, 1.5, -2), 40)
+	_capture_mouse() # PC mode: chapters own the mouse
 
 
 func _on_chapter_complete() -> void:
