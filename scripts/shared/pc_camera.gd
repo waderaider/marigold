@@ -71,6 +71,18 @@ func _process(delta: float) -> void:
 		return
 	if get_tree().paused:
 		return
+	# v0.9.2: Xbox right stick look (UE5 mapping: right stick = look).
+	# Mouse look stays primary; the stick polls alongside it. Deadzone
+	# 0.2, same sensitivity setting as the mouse.
+	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
+	var ry := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	if absf(rx) > 0.2 or absf(ry) > 0.2:
+		var sens := MarigoldGfx.mouse_sensitivity()
+		var inv := -1.0 if MarigoldGfx.mouse_invert_y() else 1.0
+		rotation.y -= rx * sens * 2.2 * delta
+		_pitch = clampf(_pitch - ry * sens * 2.2 * delta * inv,
+				deg_to_rad(-85.0), deg_to_rad(85.0))
+		_cam.rotation.x = _pitch
 	var iv := Input.get_vector("move_left", "move_right",
 			"move_forward", "move_back")
 	if iv.length_squared() > 0.0001:

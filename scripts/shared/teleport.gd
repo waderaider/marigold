@@ -298,6 +298,12 @@ static func laser_update(node: Node, rig: Dictionary, delta: float) -> void:
 		var trig := false
 		if InputMap.has_action("trigger_click") and Input.is_action_pressed("trigger_click"):
 			trig = true
+		# v0.9.2: gamepad RT (teleport_confirm) also confirms in XR mode —
+		# Bluetooth pad on Quest, or the Xbox pad while streaming via
+		# Virtual Desktop (launch mode is VR there, but a real pad exists).
+		if InputMap.has_action("teleport_confirm") \
+				and Input.is_action_just_pressed("teleport_confirm"):
+			trig = true
 		var trig_edge := trig and not bool(rig["trig_was"])
 		rig["trig_was"] = trig
 		var pinched := false
@@ -341,9 +347,21 @@ static func _laser_aim(node: Node) -> Array:
 			var o: Vector3 = ctl.global_position
 			var d: Vector3 = -ctl.global_transform.basis.z.normalized()
 			return [o, d, true]
-	# Hands fallback (camera-anchored pointer ray).
+	# Hands fallback: aim where the HAND points (real joint ray, same
+	# math as the UI pointers). v0.9.2 fix: this used to use
+	# MarigoldHands.pointer_ray, whose XR path is a head-locked proxy —
+	# the teleport marker followed your gaze, not your hand.
 	if pref != "controllers" and not force_mouse and MarigoldHands.is_xr_active():
-		var r: Array = MarigoldHands.pointer_ray(node, MarigoldGfx.dominant_hand_idx())
+		var dom := MarigoldGfx.dominant_hand_idx()
+		var side := XRPositionalTracker.TRACKER_HAND_RIGHT \
+				if dom == MarigoldHands.HAND_RIGHT \
+				else XRPositionalTracker.TRACKER_HAND_LEFT
+		var origin := node.get_tree().root.get_node_or_null(
+				"Main/XROrigin3D") as Node3D if node.get_tree() != null else null
+		var hr := XRUIPointer.hand_ray(side, origin)
+		if bool(hr["active"]):
+			return [hr["origin"], (hr["dir"] as Vector3).normalized(), true]
+		var r: Array = MarigoldHands.pointer_ray(node, dom)
 		return [r[0], (r[1] as Vector3).normalized(), true]
 	# Desktop: camera ray through the mouse.
 	var cam := node.get_viewport().get_camera_3d()

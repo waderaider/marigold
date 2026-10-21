@@ -32,7 +32,7 @@ const MANIFEST_URL := "https://raw.githubusercontent.com/waderaider/marigold/mai
 ## No-secret fallback (2026-10-09): POST /report needs no key (the read key is
 ## server-side only). Compiled-in because the async version.json fetch is the
 ## prime suspect for zero telemetry ever arriving from the headset.
-const RELAY_FALLBACK_URL := "https://nexus-log-relay.brio-00c.workers.dev/report"
+const RELAY_FALLBACK_URL := "https://nexus-log-relay.wade-relay.workers.dev/report"
 
 var _events: Array[Dictionary] = []
 var _session_id := ""
@@ -43,6 +43,9 @@ var _config_http: HTTPRequest = null
 var _flush_timer := 0.0
 var _flushing := false
 var _ready_done := false
+# v0.9.2 diagnostics: last flush outcome so the launcher panel can show
+# relay health in plain words (wade reads it back when debugging).
+var _last_flush_text := "no send yet"
 
 # Current chapter-session state (owned here so ends are idempotent).
 var _chapter := ""
@@ -192,10 +195,25 @@ func _flush_now() -> void:
 
 func _on_flush_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
 	_flushing = false
-	if not (result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300):
+	var d := Time.get_time_dict_from_system()
+	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300:
+		_last_flush_text = "OK %02d:%02d" % [int(d["hour"]), int(d["minute"])]
+	else:
 		# Offline/failed: events for this batch are dropped (telemetry is
 		# ephemeral by design; crashes still persist via the crash reporter).
-		pass
+		_last_flush_text = "FAILED (%s) %02d:%02d" % [
+				("code %d" % response_code) if response_code > 0 else "no connection",
+				int(d["hour"]), int(d["minute"])]
+
+
+## v0.9.2: one-line relay health for the launcher diagnostics panel —
+## relay host + the most recent telemetry send outcome.
+func relay_status_text() -> String:
+	var host := _report_url.trim_prefix("https://").trim_prefix("http://")
+	var slash := host.find("/")
+	if slash > 0:
+		host = host.substr(0, slash)
+	return "Relay %s · last send %s" % [host, _last_flush_text]
 
 
 func _fetch_remote_config() -> void:

@@ -57,6 +57,15 @@ static func pinch_active(node: Node, hand: int = HAND_RIGHT) -> bool:
 	var action := "pinch_right" if hand == HAND_RIGHT else "pinch_left"
 	if InputMap.has_action(action) and Input.is_action_pressed(action):
 		return true
+	# v0.9.2 FIX: the OpenXR action map binds the real hand pinch
+	# (/input/pinch_ext) to the "select_button" action — the pinch_left/
+	# pinch_right actions above do not exist in openxr_action_map.tres,
+	# so real hand-tracking pinch NEVER registered here (chapter pinch
+	# interactions and the teleport pinch fallback were dead on device).
+	# select_button aggregates both hands, same imprecision the
+	# trigger_click fallback below already accepts.
+	if InputMap.has_action("select_button") and Input.is_action_pressed("select_button"):
+		return true
 	# Trigger fallback for controllers.
 	if InputMap.has_action("trigger_click") and Input.is_action_pressed("trigger_click"):
 		return true

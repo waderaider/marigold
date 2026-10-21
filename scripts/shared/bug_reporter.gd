@@ -40,7 +40,7 @@ const MANIFEST_URL := "https://raw.githubusercontent.com/waderaider/marigold/mai
 ## version.json fetch still overrides this when it succeeds; this constant
 ## only fixes the case where that fetch never completes (prime suspect for
 ## zero device telemetry ever arriving: the URL sat empty until then).
-const RELAY_FALLBACK_URL := "https://nexus-log-relay.brio-00c.workers.dev/report"
+const RELAY_FALLBACK_URL := "https://nexus-log-relay.wade-relay.workers.dev/report"
 
 var _log_file: FileAccess = null
 var _session_path := ""

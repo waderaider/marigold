@@ -51,7 +51,7 @@ const SCROLL_REPEAT := 0.12
 const EXP_ORDER := ["mano_magica", "guitarra", "pinta", "espejo", "galeria",
 		"ofrenda_finale"]
 
-const RELAY_PING_URL := "https://nexus-log-relay.brio-00c.workers.dev/report"
+const RELAY_PING_URL := "https://nexus-log-relay.wade-relay.workers.dev/report"
 
 # Design Director palette (v0.6.2).
 const C_BG := Color(0.106, 0.059, 0.118)       # #1B0F1E
@@ -115,6 +115,11 @@ var _no_beam_s := 0.0 # seconds with XR up, menu visible, no beam drawn
 
 var _ping_http: HTTPRequest = null
 var _ping_in_flight := false
+# v0.9.2 diagnostics: last input event (source + time) for the diag line —
+# wade reads this back when debugging ("what did the menu last hear?").
+var _last_input_text := "none yet"
+var _last_input_msec := 0
+var _first_row: Button = null # focus target for gamepad/keyboard nav
 
 
 func _ready() -> void:
@@ -180,6 +185,16 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if _panel_root == null or not _panel_root.visible:
 		return
+	# v0.9.2: gamepad + keyboard navigation goes into the panel viewport
+	# FIRST (before the mouse gates): Godot's GUI focus system drives the
+	# static 2D list from the built-in ui_* actions (D-pad / left stick /
+	# arrows / Tab are in the defaults; the A button is NOT — see
+	# _forward_nav_event). Works with the room dialog open too — it lives
+	# in the same viewport.
+	if event is InputEventJoypadButton or event is InputEventJoypadMotion \
+			or event is InputEventKey:
+		_forward_nav_event(event)
+		return
 	# Room dialog eats input while open.
 	if _room_dialog != null and _room_dialog.visible:
 		return
@@ -190,9 +205,70 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_note_input("Mouse click")
 			_forward_desktop_mouse(mb)
 	elif event is InputEventMouseMotion:
 		_forward_desktop_mouse(event as InputEventMouseMotion)
+
+
+## v0.9.2: forward gamepad/keyboard navigation into the panel SubViewport.
+## A plain SubViewport only receives what is push_input()ed into it, so
+## before this, joypad events reached the root viewport and died there —
+## the Xbox pad could not drive the launcher at all. The A button gets a
+## synthetic ui_accept pair: the probe (tools/probe_092.gd) verified the
+## engine's default ui_accept has NO joypad binding, so a raw forwarded
+## JoyBtn0 would move focus but never activate the focused row.
+func _forward_nav_event(event: InputEvent) -> void:
+	if _viewport == null:
+		return
+	if event is InputEventJoypadButton:
+		var jb := event as InputEventJoypadButton
+		if jb.pressed:
+			_note_input("Gamepad")
+			_ensure_nav_focus()
+		_viewport.push_input(event)
+		if jb.pressed and jb.button_index == JOY_BUTTON_A:
+			var acc := InputEventAction.new()
+			acc.action = &"ui_accept"
+			acc.pressed = true
+			_viewport.push_input(acc)
+			var rel := InputEventAction.new()
+			rel.action = &"ui_accept"
+			rel.pressed = false
+			_viewport.push_input(rel)
+	elif event is InputEventJoypadMotion:
+		var jm := event as InputEventJoypadMotion
+		# Only the left stick navigates menus; ignore trigger axes etc.
+		if jm.axis == JOY_AXIS_LEFT_X or jm.axis == JOY_AXIS_LEFT_Y:
+			_viewport.push_input(event)
+	elif event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			match k.keycode:
+				KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_TAB, KEY_ENTER, \
+						KEY_KP_ENTER, KEY_SPACE, KEY_PAGEUP, KEY_PAGEDOWN:
+					_note_input("Keyboard")
+					_ensure_nav_focus()
+					_viewport.push_input(event)
+
+
+## First nav event with nothing focused: focus the first list row (or the
+## updates button when the list is empty) so D-pad/stick has a start.
+func _ensure_nav_focus() -> void:
+	if _viewport == null or _viewport.gui_get_focus_owner() != null:
+		return
+	var target: Control = _first_row
+	if target == null or not is_instance_valid(target) or not target.visible:
+		target = _download_button if _download_button != null \
+				and _download_button.visible else null
+	if target != null:
+		target.grab_focus()
+
+
+func _note_input(source: String) -> void:
+	_last_input_text = source
+	_last_input_msec = Time.get_ticks_msec()
 
 
 ## ---- public API (called by main.gd) ----
@@ -555,6 +631,9 @@ func _build_ui() -> void:
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# v0.9.2: gamepad/keyboard focus navigation scrolls the focused row
+	# into view automatically.
+	_scroll.follow_focus = true
 	list_hbox.add_child(_scroll)
 
 	_list_vbox = VBoxContainer.new()
@@ -669,6 +748,7 @@ func _apply_pc_framing() -> void:
 func _rebuild_list() -> void:
 	if not _list_built or _list_vbox == null:
 		return
+	_first_row = null
 	for c in _list_vbox.get_children():
 		c.queue_free()
 	_add_section_header("STORY CHAPTERS")
@@ -682,6 +762,8 @@ func _rebuild_list() -> void:
 			mark = "▶ "
 		var row := _make_row("%d. %s%s" % [i + 1, mark, name],
 				String(info.get("desc", "")))
+		if _first_row == null:
+			_first_row = row
 		var idx := i
 		row.pressed.connect(func() -> void:
 			if MarigoldState.music != null:
@@ -756,7 +838,9 @@ func _make_row(name: String, desc: String) -> Button:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", pressed)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	# v0.9.2: a VISIBLE focus box (was StyleBoxEmpty) — gamepad/keyboard
+	# navigation is blind without one.
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 
 	var vb := VBoxContainer.new()
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -801,7 +885,7 @@ func _make_scroll_button(text: String, dir: int) -> Button:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", hover)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 	b.pressed.connect(func() -> void:
 		if _scroll != null:
 			_scroll.scroll_vertical += -dir * SCROLL_STEP)
@@ -920,8 +1004,18 @@ func _make_button(text: String, font_size: int, accent: Color) -> Button:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", pressed)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 	return b
+
+
+## v0.9.2: focus style for gamepad/keyboard navigation — accent fill +
+## thick cream border so the focused control is unmistakable at 2 m.
+func _focus_style(base: StyleBoxFlat) -> StyleBoxFlat:
+	var f := base.duplicate() as StyleBoxFlat
+	f.bg_color = C_ACCENT
+	f.border_color = C_CREAM
+	f.set_border_width_all(5)
+	return f
 
 
 ## ---- panel placement (the photo bug) ----
@@ -1017,7 +1111,7 @@ func _build_pointers() -> void:
 			p.name = "Pointer" + c.name
 			p.controller = c
 			p.setup(_viewport, _quad, _xr_origin)
-			p.xr_clicked.connect(_on_pointer_clicked)
+			p.xr_clicked.connect(_on_pointer_clicked.bind(p))
 			p.xr_moved.connect(_on_pointer_moved)
 			_panel_root.add_child(p)
 			_pointers.append(p)
@@ -1028,7 +1122,7 @@ func _build_pointers() -> void:
 		hp.name = "PointerHand%d" % side
 		hp.hand_side = side
 		hp.setup(_viewport, _quad, _xr_origin)
-		hp.xr_clicked.connect(_on_pointer_clicked)
+		hp.xr_clicked.connect(_on_pointer_clicked.bind(hp))
 		hp.xr_moved.connect(_on_pointer_moved)
 		_panel_root.add_child(hp)
 		_pointers.append(hp)
@@ -1075,7 +1169,20 @@ func _on_pointer_moved(viewport_pos: Vector2) -> void:
 	inject_motion(viewport_pos)
 
 
-func _on_pointer_clicked(viewport_pos: Vector2) -> void:
+## v0.9.2: clicks carry a plain-words source into the diag line.
+func _pointer_source(p: XRUIPointer) -> String:
+	if p == null:
+		return "Laser"
+	if p.hand_side != 0:
+		return "Pinch %s" % ("L" if p.hand_side \
+				== XRPositionalTracker.TRACKER_HAND_LEFT else "R")
+	if p.controller != null:
+		return "Laser %s" % ("L" if String(p.controller.name).to_lower().find("left") >= 0 else "R")
+	return "Laser"
+
+
+func _on_pointer_clicked(viewport_pos: Vector2, p: XRUIPointer = null) -> void:
+	_note_input(_pointer_source(p) + " click")
 	inject_click(viewport_pos)
 
 
@@ -1083,7 +1190,8 @@ func _on_fallback_moved(viewport_pos: Vector2, _kind: String) -> void:
 	inject_motion(viewport_pos)
 
 
-func _on_fallback_clicked(viewport_pos: Vector2, _kind: String) -> void:
+func _on_fallback_clicked(viewport_pos: Vector2, kind: String) -> void:
+	_note_input(("Pinch" if kind == "hands" else "Laser") + " click (spare path)")
 	inject_click(viewport_pos)
 
 
@@ -1163,6 +1271,7 @@ func _update_gaze(delta: float) -> void:
 	if _dwell_t >= DWELL_TIME:
 		_dwell_t = 0.0
 		_dwell_ring.visible = false
+		_note_input("Gaze dwell")
 		inject_click(pos)
 
 
@@ -1187,8 +1296,27 @@ func _refresh_diag() -> void:
 	var warn := ""
 	if get_viewport().use_xr and _no_beam_s > 3.0:
 		warn = "  ⚠ NO INPUT SOURCE LIVE — look at a button and hold 1.2s"
-	_diag_label.text = "Headset: %s · Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s" \
-			% [_headset_model(), ctl, hands, gaze, dist, boot, warn]
+	# v0.9.2: second line — gamepad presence, LAST INPUT EVENT heard
+	# (source + age), and relay health from the telemetry autoload, so a
+	# read-back over the phone localizes a dead input path in one line.
+	var age := "—"
+	if _last_input_msec > 0:
+		age = "%ds ago" % int(float(Time.get_ticks_msec() - _last_input_msec) / 1000.0)
+	var relay := "Relay: unknown"
+	var gt := get_node_or_null("/root/GameplayTelemetry")
+	if gt != null and gt.has_method("relay_status_text"):
+		relay = String(gt.call("relay_status_text"))
+	_diag_label.text = "Headset: %s · Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s\nPad: %s · Last input: %s (%s) · %s" \
+			% [_headset_model(), ctl, hands, gaze, dist, boot, warn,
+				_diag_pad(), _last_input_text, age, relay]
+
+
+func _diag_pad() -> String:
+	var pads := Input.get_connected_joypads()
+	if pads.is_empty():
+		return "none"
+	var nm := Input.get_joy_name(pads[0])
+	return nm if nm != "" else "connected"
 
 
 func _diag_controllers() -> String:

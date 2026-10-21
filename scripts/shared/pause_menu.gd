@@ -111,6 +111,7 @@ var _mode_note_text := ""
 var _dwell_t := 0.0
 var _dwell_pos := Vector2.ZERO
 var _dwell_ring: MeshInstance3D
+var _resume_btn: Button = null # v0.9.2: default focus for pad/keyboard nav
 
 var _last_click_msec := 0
 var _last_click_pos := Vector2(-9999, -9999)
@@ -162,7 +163,25 @@ func _input(event: InputEvent) -> void:
 			_cooldown = 0.4
 			_toggle_pause("esc")
 		return
+	# v0.9.2: Xbox Start/Menu button toggles pause (project action
+	# "pause_menu", JoyBtn 6) — the OpenXR menu-button hold path below
+	# is Quest-controller only, so a gamepad had NO way to open pause.
+	if event.is_action_pressed("pause_menu"):
+		if _attached and _cooldown <= 0.0:
+			_cooldown = 0.4
+			_toggle_pause("gamepad")
+		return
 	if not _attached:
+		return
+	# v0.9.2: while pause is OPEN, gamepad/keyboard navigation is
+	# forwarded into the panel viewport (Godot GUI focus drives the
+	# static grid; A gets a synthetic ui_accept — the engine default
+	# has no joypad accept binding, verified by tools/probe_092.gd).
+	# Deliberately NOT forwarded while closed: a pad A press in a
+	# chapter means "interact", never "press the floating II button".
+	if _pause_open and (event is InputEventJoypadButton
+			or event is InputEventJoypadMotion or event is InputEventKey):
+		_forward_nav_event(event)
 		return
 	# Desktop mouse fallback into whichever UI is visible (XR pointers quiet).
 	if _any_pointer_live():
@@ -178,6 +197,58 @@ func _input(event: InputEvent) -> void:
 			_forward_mouse(event as InputEventMouse, cam, _panel_quad, _panel_viewport, PANEL_VP)
 		elif not _pause_open and _exit_quad != null and _exit_root.visible:
 			_forward_mouse(event as InputEventMouse, cam, _exit_quad, _exit_viewport, Vector2(EXIT_VP))
+
+
+## v0.9.2: gamepad/keyboard navigation for the open pause panel.
+## B backs out (settings/legend page -> main page -> resume); A
+## activates the focused control via a synthetic ui_accept pair.
+func _forward_nav_event(event: InputEvent) -> void:
+	var vp := _active_viewport()
+	if vp == null:
+		return
+	if event is InputEventJoypadButton:
+		var jb := event as InputEventJoypadButton
+		if jb.pressed and jb.button_index == JOY_BUTTON_B:
+			if _page_settings != null and _page_settings.visible:
+				_show_main_page()
+			elif _legend_page != null and _legend_page.visible:
+				_show_main_page()
+			else:
+				_resume()
+			return
+		if jb.pressed:
+			_ensure_nav_focus(vp)
+		vp.push_input(event)
+		if jb.pressed and jb.button_index == JOY_BUTTON_A:
+			var acc := InputEventAction.new()
+			acc.action = &"ui_accept"
+			acc.pressed = true
+			vp.push_input(acc)
+			var rel := InputEventAction.new()
+			rel.action = &"ui_accept"
+			rel.pressed = false
+			vp.push_input(rel)
+	elif event is InputEventJoypadMotion:
+		var jm := event as InputEventJoypadMotion
+		if jm.axis == JOY_AXIS_LEFT_X or jm.axis == JOY_AXIS_LEFT_Y:
+			vp.push_input(event)
+	elif event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			match k.keycode:
+				KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_TAB, KEY_ENTER, \
+						KEY_KP_ENTER, KEY_SPACE, KEY_PAGEUP, KEY_PAGEDOWN:
+					_ensure_nav_focus(vp)
+					vp.push_input(event)
+
+
+## Focus Continuar when navigation starts with nothing focused.
+func _ensure_nav_focus(vp: SubViewport) -> void:
+	if vp.gui_get_focus_owner() != null:
+		return
+	if _resume_btn != null and is_instance_valid(_resume_btn) \
+			and _resume_btn.visible:
+		_resume_btn.grab_focus()
 
 
 ## ---- public API (called by main.gd) ----
@@ -203,6 +274,14 @@ func attach(restart: Callable, quit: Callable, legend_key: String = "",
 		_direct.set_target(_exit_viewport, _exit_quad)
 	# The main scene exists now (autoloads ready before it): wire controllers.
 	_ensure_origin()
+	# v0.9.2 fix: the hand pointers were setup() in _ready with a null
+	# XR origin (autoloads ready before Main exists) and never re-pointed,
+	# so their joint rays were computed in raw tracking space — wrong
+	# whenever XROrigin3D is not identity. Hand them the real origin.
+	if _xr_origin != null:
+		for p in _exit_pointers + _panel_pointers:
+			if is_instance_valid(p):
+				p.xr_origin = _xr_origin
 	_add_controller_pointers(_exit_pointers, _exit_viewport, _exit_quad)
 	_add_controller_pointers(_panel_pointers, _panel_viewport, _panel_quad)
 
@@ -523,7 +602,7 @@ func _build_panel() -> void:
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 12)
 	_panel_stack.add_child(actions)
-	_add_action_button(actions, "Continuar", C_GREEN, _resume)
+	_resume_btn = _add_action_button(actions, "Continuar", C_GREEN, _resume)
 	_add_action_button(actions, "Controles", C_BLUE, _show_legend_page)
 	_add_action_button(actions, "Ajustes", C_PINK, _show_settings_page)
 	_add_action_button(actions, "Reiniciar", C_ORANGE, _on_restart)
@@ -656,7 +735,7 @@ func _style_card(b: Button, current: bool) -> void:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", pressed)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 
 
 ## 4px accent border on the current chapter's card (re-marked on attach).
@@ -720,6 +799,16 @@ func _add_action_button(parent: Control, text: String, accent: Color,
 	return b
 
 
+## v0.9.2: visible focus box for gamepad/keyboard navigation (was
+## StyleBoxEmpty everywhere — pad navigation was blind).
+func _focus_style(base: StyleBoxFlat) -> StyleBoxFlat:
+	var f := base.duplicate() as StyleBoxFlat
+	f.bg_color = C_MARIGOLD
+	f.border_color = C_CREAM
+	f.set_border_width_all(4)
+	return f
+
+
 func _style_grid_button(b: Button, accent: Color) -> void:
 	var normal := StyleBoxFlat.new()
 	normal.bg_color = C_PLUM_LIGHT
@@ -733,7 +822,7 @@ func _style_grid_button(b: Button, accent: Color) -> void:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", pressed)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 
 
 ## ---- settings page (v0.7.0, wade's order) ----
@@ -1014,7 +1103,7 @@ func _add_panel_button(parent: Control, text: String, accent: Color,
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", pressed)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
 	b.pressed.connect(cb)
 	parent.add_child(b)
 	return b
