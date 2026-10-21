@@ -162,6 +162,7 @@ var _wind_lights: Array = [] # {"light": OmniLight3D, "base": float, "phase": fl
 func _ready() -> void:
 	_build_plaza()
 	_build_guitar()
+	_build_wave_dressing()
 	_build_mode_select()
 	_build_ui()
 	MarigoldPlaques.place_plaque(
@@ -403,6 +404,42 @@ func _build_plaza() -> void:
 
 
 ## ---- guitar ----
+
+## v0.9.0 UE5-wave dressing: the artist folk guitar resting by the corner,
+## a spare Poly Pizza guitar, and a tin lantern for the plaza.
+func _build_wave_dressing() -> void:
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.artist_model("guitar_folk"),
+		Vector3(1.35, 0.02, -1.7), 0.37, -25.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("instruments", "guitar_quaternius"),
+		Vector3(-1.4, 0.02, -1.6), 0.4, 30.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("lights", "lantern_joedorman"),
+		Vector3(2.3, 0, 0.6), 0.5, 0.0)
+	# Serape-draped side table (in-house serape PBR, UE5 wave).
+	var table := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(0.9, 0.06, 0.6)
+	table.mesh = tb
+	table.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ai_tests/serape_weave_albedo.png",
+		Color(1.1, 1.0, 1.0), 1.5, 0.9,
+		"res://assets/textures/ai_tests/serape_weave_normal.png",
+		"res://assets/textures/ai_tests/serape_weave_roughness.png")
+	table.position = Vector3(-2.4, 0.55, 1.2)
+	_dressing.add_child(table)
+	var leg_mat := MarigoldFX.pbr(Color(0.30, 0.18, 0.08), 0.0, 0.8)
+	for lx in [-0.38, 0.38]:
+		for lz in [-0.22, 0.22]:
+			var leg := MeshInstance3D.new()
+			var lb := BoxMesh.new()
+			lb.size = Vector3(0.06, 0.55, 0.06)
+			leg.mesh = lb
+			leg.material_override = leg_mat
+			leg.position = Vector3(-2.4 + lx, 0.27, 1.2 + lz)
+			_dressing.add_child(leg)
+
 
 func _build_guitar() -> void:
 	var root := Node3D.new()

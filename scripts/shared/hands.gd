@@ -29,7 +29,7 @@ static func is_xr_active() -> bool:
 ## MarigoldState autoload at runtime (never at parse time, so headless
 ## --check-only stays clean).
 static func _pc_mode_via(node: Node) -> bool:
-	if node == null:
+	if node == null or not node.is_inside_tree():
 		return false
 	var st: Node = node.get_node_or_null("/root/MarigoldState")
 	return st != null and st.has_method("is_pc_mode") \

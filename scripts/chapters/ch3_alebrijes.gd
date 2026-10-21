@@ -303,7 +303,12 @@ func _build_plaza() -> void:
 	disc.radial_segments = 48
 	var disc_mi := MeshInstance3D.new()
 	disc_mi.mesh = disc
-	disc_mi.material_override = MarigoldFX.pbr(Color(0.09, 0.04, 0.12), 0.0, 0.9)
+	# v0.9.0: saltillo floor PBR (AI-test set, UE5 wave) on the plaza disc.
+	disc_mi.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ai_tests/saltillo_floor_albedo.png",
+		Color(0.30, 0.14, 0.38), 7.0, 0.9,
+		"res://assets/textures/ai_tests/saltillo_floor_normal.png",
+		"res://assets/textures/ai_tests/saltillo_floor_roughness.png")
 	disc_mi.position.y = -0.06
 	_ground_group.add_child(disc_mi)
 
@@ -411,6 +416,7 @@ func _build_plaza() -> void:
 	_build_market()
 	_build_string_lights()
 	_build_skyline()
+	_build_wave_dressing()
 
 
 # ---------------------------------------------------------------- market stalls
@@ -452,7 +458,12 @@ func _build_stall(sd: Dictionary) -> void:
 	canopy.size = Vector3(2.2, 0.08, 1.6)
 	var cmi := MeshInstance3D.new()
 	cmi.mesh = canopy
-	cmi.material_override = MarigoldFX.pbr(Color(0.55, 0.16, 0.10), 0.0, 0.6)
+	# v0.9.0: woven textile PBR (AI-test set, UE5 wave) on stall canopies.
+	cmi.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ai_tests/woven_textile_albedo.png",
+		Color(1.15, 0.50, 0.38), 2.0, 0.6,
+		"res://assets/textures/ai_tests/woven_textile_normal.png",
+		"res://assets/textures/ai_tests/woven_textile_roughness.png")
 	cmi.position = Vector3(0, 2.45, 0)
 	root.add_child(cmi)
 	var trim := BoxMesh.new()
@@ -672,6 +683,92 @@ func _greet_guide(g: Dictionary) -> void:
 	MarigoldPhotos.note_moment("guide_greet")
 
 
+## v0.9.0 UE5-wave dressing: hero alebrije monuments on stone plinths,
+## hunt-wave spirit alebrijes, market ware, skyline towers, band props.
+## The hero alebrijes are single-piece meshes, so they stand as plaza
+## monuments of the same three species — the interactive guides keep
+## their articulated in-house models (the character rig needs the parts).
+func _build_wave_dressing() -> void:
+	var monuments := [
+		["alebrije_venado_hero", Vector3(6.2, 0, -5.5), -35.0],
+		["alebrije_jaguar_alado_hero", Vector3(-6.4, 0, -4.6), 40.0],
+		["alebrije_serpiente_hero", Vector3(6.8, 0, 3.8), -70.0],
+	]
+	for m in monuments:
+		var p: Vector3 = m[1]
+		var plinth := MarigoldModels.place(_dressing, MarigoldModels.GRAVEYARD,
+			"altar-stone", p, float(m[2]), 1.6)
+		var ph := 0.9
+		if plinth != null:
+			ph = MarigoldModels.bounds_of(plinth).size.y
+		MarigoldModels.ground_place(_dressing,
+			MarigoldModels.artist_model(String(m[0])),
+			Vector3(p.x, ph, p.z), 1.5, float(m[2]))
+	var spirits := [
+		["alebrije_fox_spirit", Vector3(3.4, 0, 5.4), 0.55, -120.0],
+		["alebrije_salamander", Vector3(-3.6, 0, 5.8), 0.4, 60.0],
+		["alebrije_dragon_chibi", Vector3(1.15, 0.56, -1.85), 0.35, 20.0],
+		["alebrije_macaw_scarlet", Vector3(-1.3, 0.56, -0.15), 0.4, 130.0],
+		["alebrije_toucan", Vector3(0.2, 0.56, -2.2), 0.38, -40.0],
+	]
+	for s in spirits:
+		MarigoldModels.ground_place(_dressing,
+			MarigoldModels.hunt2_model(String(s[0])),
+			s[1], float(s[2]), float(s[3]))
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.hunt2_model("butterfly_a"), Vector3(2.2, 0.5, 0.8), 0.18, 30.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.hunt2_model("butterfly_b"), Vector3(-2.4, 0.45, 1.4), 0.16, -50.0)
+	var pots := ["jar_creativetrio", "large_pot_isalousberg",
+		"medium_pot_isalousberg", "pot_c_large_isalousberg", "pot_quaternius"]
+	for i in pots.size():
+		MarigoldModels.ground_place(_dressing,
+			MarigoldModels.polypizza_model("pots", pots[i]),
+			Vector3(-2.2 + float(i) * 0.55, 0, 5.6), 0.42, float(i) * 37.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("banners", "banner_quaternius"),
+		Vector3(-3.1, 0, 4.9), 1.6, 25.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("banners", "banner2_quaternius"),
+		Vector3(3.1, 0, 4.9), 1.6, -25.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("lights", "holiday_lights_polygoogle"),
+		Vector3(0, 2.55, 4.9), 3.4, 0.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("lights", "tree_light_quaternius"),
+		Vector3(6.1, 0, 6.0), 1.1, 0.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("hats", "sombrero_hatmyguy"),
+		Vector3(-4.35, 0.02, 3.55), 0.4, 15.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("instruments", "violin_jeremy"),
+		Vector3(-3.55, 0.02, 3.3), 0.55, 70.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.hunt2_model("alebrije_jaguar_winged"),
+		Vector3(-5.8, 0, 6.2), 0.9, 145.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("instruments", "tamborine_polygoogle"),
+		Vector3(-5.35, 0.02, 2.2), 0.3, 0.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("instruments", "guitar_zsky"),
+		Vector3(4.6, 0.02, 1.8), 0.42, -30.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("flowers", "flowers_quaternius"),
+		Vector3(1.9, 0, -2.6), 0.35, 80.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("flowers", "flower_petal_quaternius"),
+		Vector3(-1.9, 0, -2.7), 0.3, -20.0, true)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("architecture", "bell_tower_quaternius"),
+		Vector3(-13.0, 0, -13.0), 8.5, 20.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("architecture", "stone_tower_quaternius"),
+		Vector3(13.5, 0, -12.0), 7.5, -15.0)
+	MarigoldModels.ground_place(_dressing,
+		MarigoldModels.polypizza_model("architecture", "temple_quaternius"),
+		Vector3(0, 0, -19.0), 6.0, 0.0)
+
+
 ## Street band (finding 7): 3 musicians under one umbrella at the plaza
 ## edge (3 here + 3 in ch5 = the 6-musician hard cap).
 func _build_band() -> void:
@@ -687,6 +784,16 @@ func _build_band() -> void:
 		add_child(root)
 		d["base_y"] = 0.0
 		_band.append(d)
+	# v0.9.0: two hero mariachi (rigged artist GLBs, baked Play clips)
+	# join the plaza band from the UE5 ContentStaging wave.
+	var hero_kinds := ["trumpet", "maracas"]
+	for i in hero_kinds.size():
+		var hero := MarigoldBanda.make_mariachi(hero_kinds[i], float(i) * 2.11 + 0.6)
+		if hero == null:
+			continue
+		hero.position = Vector3(-3.2 + float(i) * 0.8, 0, 4.2)
+		hero.rotation.y = 0.7
+		add_child(hero)
 
 
 func _update_band(delta: float) -> void:

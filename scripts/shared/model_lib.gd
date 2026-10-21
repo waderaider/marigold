@@ -6,6 +6,10 @@ class_name MarigoldModels
 
 const BASE := "res://assets/models/kenney/"
 const BLENDER_BASE := "res://assets/models/blender/"
+## v0.9.0: UE5 ContentStaging wave (artist heroes, Poly Pizza CC0, hunt2).
+const ARTIST_BASE := "res://assets/models/artist/"
+const POLYPIZZA_BASE := "res://assets/models/polypizza/"
+const HUNT2_BASE := "res://assets/models/hunt2/"
 
 ## Pack subdirectories.
 const GRAVEYARD := "graveyard/"
@@ -42,7 +46,26 @@ static func instance(pack: String, model_name: String) -> Node3D:
 
 ## Load an in-house Blender GLB (e.g. alebrijes). Same cache contract.
 static func blender_model(subdir: String, model_name: String) -> Node3D:
-	var path := BLENDER_BASE + subdir + model_name + ".glb"
+	return blender_model_path(BLENDER_BASE + subdir + model_name + ".glb")
+
+
+## Load an artist-hero GLB (UE5 ContentStaging wave, v0.9.0).
+static func artist_model(model_name: String) -> Node3D:
+	return blender_model_path(ARTIST_BASE + model_name + ".glb")
+
+
+## Load a Poly Pizza CC0 GLB by category (v0.9.0).
+static func polypizza_model(category: String, model_name: String) -> Node3D:
+	return blender_model_path(POLYPIZZA_BASE + category + "/" + model_name + ".glb")
+
+
+## Load a hunt-wave alebrije GLB (v0.9.0).
+static func hunt2_model(model_name: String) -> Node3D:
+	return blender_model_path(HUNT2_BASE + model_name + ".glb")
+
+
+## Load a GLB by full res:// path. Same cache contract as blender_model.
+static func blender_model_path(path: String) -> Node3D:
 	if _cache.has(path):
 		var cached: PackedScene = _cache[path]
 		if cached != null and is_instance_valid(cached):
@@ -126,6 +149,26 @@ static func bounds_of(model: Node) -> AABB:
 		for c in n.get_children():
 			stack.append([c, lt])
 	return bounds
+
+
+## v0.9.0: scale an instantiated GLB to a target height (or width), ground
+## it on pos (its AABB base sits at pos.y), rotate, and add it to parent.
+## Used for the UE5-wave heroes + Poly Pizza dressing whose native sizes
+## vary wildly. Returns the instance (or null).
+static func ground_place(parent: Node3D, n: Node3D, pos: Vector3,
+		target: float, rot_y_deg: float = 0.0, by_width: bool = false) -> Node3D:
+	if n == null:
+		return null
+	var b := bounds_of(n)
+	var dim := b.size.x if by_width else b.size.y
+	if dim <= 0.001:
+		dim = 1.0
+	var s := target / dim
+	n.scale = Vector3.ONE * s
+	n.position = pos + Vector3(0, -b.position.y * s, 0)
+	n.rotation.y = deg_to_rad(rot_y_deg)
+	parent.add_child(n)
+	return n
 
 
 ## Place a model under a parent with transform. Returns the instance (or null).

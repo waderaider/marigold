@@ -129,6 +129,13 @@ func _build() -> void:
 	disc.position = Vector3(0, -0.03, -2.2)
 	_backdrop.add_child(disc)
 	MarigoldModels.make_flower_field(_backdrop, 140, 4.0, 777).position = Vector3(0, 0, -2.2)
+	# v0.9.0 UE5-wave dressing: hunt-wave spirit alebrijes watch the mirror.
+	MarigoldModels.ground_place(_backdrop,
+		MarigoldModels.hunt2_model("alebrije_parrot"),
+		Vector3(-2.6, 0, -3.6), 0.4, 35.0)
+	MarigoldModels.ground_place(_backdrop,
+		MarigoldModels.hunt2_model("alebrije_kaiju_teal"),
+		Vector3(2.6, 0, -3.4), 0.55, -30.0)
 	MarigoldFX.spawn_ambient_motes(_backdrop, Vector3(0, 1.6, -2.2), 4.0, 60)
 	MarigoldAmbient.add_butterflies(_backdrop, Vector3(0, 1.7, -2.2), 6, 4.0)
 	# Labels.

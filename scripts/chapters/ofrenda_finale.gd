@@ -20,6 +20,7 @@ var _backdrop: Node3D
 var _shelf: Node3D
 var _candle_mats: Array = []
 var _candle_flames: Array = [] # v0.7.0 VFX: flame positions for ignition FX
+var _ring_roots: Array = [] # v0.9.0: CandleMelt registration roots
 var _last_lit := -1 # v0.7.0 VFX: lit-candle count last frame
 var _plaque: Node3D
 var _stage_home := Vector3(0, 0, -0.2)
@@ -99,14 +100,24 @@ func _build() -> void:
 	var fm := PlaneMesh.new()
 	fm.size = Vector2(16, 16)
 	floor_mi.mesh = fm
-	floor_mi.material_override = MarigoldFX.pbr(Color(0.10, 0.06, 0.08), 0.0, 0.9)
+	# v0.9.0: ambientCG Tiles144 PBR (UE5 wave) on the finale floor.
+	floor_mi.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ambientcg/Tiles144/Tiles144_1K-JPG_Color.jpg",
+		Color(0.35, 0.22, 0.26), 6.0, 0.9,
+		"res://assets/textures/ambientcg/Tiles144/Tiles144_1K-JPG_NormalGL.jpg",
+		"res://assets/textures/ambientcg/Tiles144/Tiles144_1K-JPG_Roughness.jpg")
 	floor_mi.position = Vector3(0, 0, -2.0)
 	_backdrop.add_child(floor_mi)
 	var wall := MeshInstance3D.new()
 	var wm := BoxMesh.new()
 	wm.size = Vector3(14, 5, 0.2)
 	wall.mesh = wm
-	wall.material_override = MarigoldFX.pbr(Color(0.12, 0.06, 0.09), 0.0, 0.95)
+	# v0.9.0: ambientCG Plaster001 PBR on the back wall.
+	wall.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ambientcg/Plaster001/Plaster001_1K-JPG_Color.jpg",
+		Color(0.38, 0.20, 0.28), 4.0, 0.95,
+		"res://assets/textures/ambientcg/Plaster001/Plaster001_1K-JPG_NormalGL.jpg",
+		"res://assets/textures/ambientcg/Plaster001/Plaster001_1K-JPG_Roughness.jpg")
 	wall.position = Vector3(0, 2.5, -4.6)
 	_backdrop.add_child(wall)
 	# The player's ofrenda, full size, centered.
@@ -116,6 +127,7 @@ func _build() -> void:
 	_build_candle_ring()
 	_build_papel_frame()
 	_build_host()
+	_build_wave_dressing()
 	_grade_memory_objects()
 	var title := MarigoldFX.make_label("Tu Ofrenda", 84, C_GOLD)
 	title.position = Vector3(0, 3.4, -4.4)
@@ -129,22 +141,35 @@ func _build() -> void:
 
 func _build_candle_ring() -> void:
 	# Ring of candles around the ofrenda (emissive only - zero real lights
-	# beyond the chapter's shared budget).
+	# beyond the chapter's shared budget). v0.9.0: each candle is a root
+	# registered with CandleMelt — lit candles visibly melt (UE5 Living Wax
+	# port). Light cylinders stay (14 instances of the 161k-tri hero candle
+	# would blow the Quest frame budget; the hero stars in ch1 instead).
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 88
 	for i in 14:
 		var a := TAU * float(i) / 14.0
 		var r := 2.0
 		var pos := Vector3(cos(a) * r, 0, -3.0 + sin(a) * r * 0.7)
+		var hgt := rng.randf_range(0.25, 0.45)
+		var root := Node3D.new()
+		root.name = "RingCandle_%d" % i
+		root.position = pos
+		_stage.add_child(root)
 		var stick := MeshInstance3D.new()
 		var sm := CylinderMesh.new()
 		sm.top_radius = 0.035
 		sm.bottom_radius = 0.035
-		sm.height = rng.randf_range(0.25, 0.45)
+		sm.height = hgt
 		stick.mesh = sm
-		stick.material_override = MarigoldFX.pbr(C_CREAM, 0.0, 0.6)
-		stick.position = pos + Vector3(0, 0.15, 0)
-		_stage.add_child(stick)
+		# v0.9.0: real wax PBR set on the ring candles too.
+		stick.material_override = MarigoldFX.pbr_tex(
+			"res://assets/textures/in-house/wax/candle_wax_512_albedo.png",
+			C_CREAM, 2.0, 0.6,
+			"res://assets/textures/in-house/wax/candle_wax_512_normal.png",
+			"res://assets/textures/in-house/wax/candle_wax_512_roughness.png")
+		stick.position = Vector3(0, hgt * 0.5, 0)
+		root.add_child(stick)
 		var flame := MeshInstance3D.new()
 		var fm2 := SphereMesh.new()
 		fm2.radius = 0.035
@@ -152,10 +177,38 @@ func _build_candle_ring() -> void:
 		flame.mesh = fm2
 		var fmat := MarigoldFX.glow(Color(1.0, 0.62, 0.18), 1.6)
 		flame.material_override = fmat
-		flame.position = pos + Vector3(0, 0.42, 0)
-		_stage.add_child(flame)
+		flame.position = Vector3(0, hgt + 0.045, 0)
+		root.add_child(flame)
 		_candle_mats.append(fmat)
-		_candle_flames.append(pos + Vector3(0, 0.42, 0)) # VFX ignition anchor
+		_candle_flames.append(pos + Vector3(0, hgt + 0.045, 0)) # VFX ignition anchor
+		root.add_to_group("marigold_candles")
+		root.set_meta("melt_wax", stick)
+		root.set_meta("melt_sinks", [flame])
+		root.set_meta("melt_lit_mode", "meta")
+		root.set_meta("melt_lit", false)
+		root.set_meta("melt_top", hgt)
+		root.set_meta("melt_radius", 0.035)
+		_ring_roots.append(root)
+
+
+## v0.9.0 UE5-wave dressing: the hero nicho shrine mounted over the altar,
+## the artist chandelier, tin lanterns, and a woven carpet (Poly Pizza).
+func _build_wave_dressing() -> void:
+	MarigoldModels.ground_place(_backdrop,
+		MarigoldModels.blender_model(MarigoldModels.OFRENDA, "shrine_nicho_hero"),
+		Vector3(0, 0.92, -4.42), 1.32, 0.0)
+	var chand := MarigoldModels.artist_model("chandelier_hero")
+	if chand != null:
+		var cb := MarigoldModels.bounds_of(chand)
+		chand.position = Vector3(0, 3.55 - cb.size.y, -3.0)
+		_backdrop.add_child(chand)
+	for lx in [-1.75, 1.75]:
+		MarigoldModels.ground_place(_stage,
+			MarigoldModels.artist_model("lantern_hojalata_hero"),
+			Vector3(lx, 0, -3.7), 0.47, 0.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("textiles", "wool_carpet_zsky"),
+		Vector3(0, 0.012, -1.1), 3.0, 0.0, true)
 
 
 func _build_papel_frame() -> void:
@@ -200,6 +253,9 @@ func _update_candle_progress() -> void:
 		var m: StandardMaterial3D = _candle_mats[i]
 		if m == null or not is_instance_valid(m):
 			continue
+		# v0.9.0: feed the melt system this candle's lit state.
+		if i < _ring_roots.size():
+			(_ring_roots[i] as Node3D).set_meta("melt_lit", i < lit)
 		if i < lit:
 			var base := 1.6 if not _revealed else 2.6
 			m.emission_energy_multiplier = base + sin(_t * 9.0 + float(i) * 1.7) * 0.5

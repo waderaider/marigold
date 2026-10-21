@@ -280,6 +280,14 @@ func _build() -> void:
 		"A guided tour of your own hands: pinch a bud until it blooms, carry a light orb, throw petals, sculpt clay, conduct bells, and pet an alebrije spirit. Pinch, trigger, or mouse - every gesture works.",
 		Vector3(-1.9, 1.5, -1.0), 1.9)
 	_build_stations()
+	# v0.9.0 UE5-wave dressing: hero marigold clusters flank the tour stage.
+	for cx in [-1.7, 1.7]:
+		MarigoldModels.ground_place(_stage,
+			MarigoldModels.artist_model("marigold_cluster_hero"),
+			Vector3(cx, 0.0, -2.3), 0.33, cx * 55.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.artist_model("flower_petal_quaternius"),
+		Vector3(0.6, 0.012, -0.9), 0.3, 25.0, true)
 
 
 func _build_stations() -> void:

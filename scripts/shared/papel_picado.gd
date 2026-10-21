@@ -82,8 +82,31 @@ static func _punch_diamond(img: Image, cx: float, cy: float, r: int, clear: Colo
 
 ## The 3D banner material: alpha-tested cut paper, unshaded, slight emission
 ## so it glows warm under candlelight.
+const ATLAS_PATH := "res://assets/textures/in-house/papel_picado/papel_picado_atlas_1024.png"
+static var _atlas: Texture2D = null
+static var _atlas_tried := false
+
+
+## v0.9.0: the artist papel-picado atlas (UE5 ContentStaging wave) — a
+## full-color cut-paper sheet. Different seeds sample different regions.
 static func banner_material(seed: int) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
+	if not _atlas_tried:
+		_atlas_tried = true
+		if ResourceLoader.exists(ATLAS_PATH):
+			_atlas = load(ATLAS_PATH) as Texture2D
+	if _atlas != null:
+		m.albedo_texture = _atlas
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.alpha_scissor_threshold = 0.5
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.emission_enabled = true
+		m.emission_texture = _atlas
+		m.emission_energy_multiplier = 0.7
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.uv1_scale = Vector3(0.5, 0.5, 1.0)
+		m.uv1_offset = Vector3(float(seed % 2) * 0.5, float((seed / 2) % 2) * 0.5, 0.0)
+		return m
 	m.albedo_texture = banner_texture_2d(seed)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	m.alpha_scissor_threshold = 0.5

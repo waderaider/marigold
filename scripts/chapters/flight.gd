@@ -119,13 +119,27 @@ func _build(from_name: String, to_name: String) -> void:
 	var gm := PlaneMesh.new()
 	gm.size = Vector2(160, 220)
 	gnd.mesh = gm
-	gnd.material_override = MarigoldFX.pbr(Color(0.05, 0.03, 0.07), 0.0, 1.0)
+	# v0.9.0: ambientCG PavingStones046 PBR (UE5 wave) on the town ground.
+	gnd.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/ambientcg/PavingStones046/PavingStones046_1K-JPG_Color.jpg",
+		Color(0.16, 0.10, 0.20), 48.0, 1.0,
+		"res://assets/textures/ambientcg/PavingStones046/PavingStones046_1K-JPG_NormalGL.jpg",
+		"res://assets/textures/ambientcg/PavingStones046/PavingStones046_1K-JPG_Roughness.jpg")
 	gnd.position = Vector3(0, -0.5, -60)
 	_town.add_child(gnd)
 	# Houses: one MultiMesh of dark boxes.
 	var house_mesh := BoxMesh.new()
 	house_mesh.size = Vector3(1, 1, 1)
-	house_mesh.material = MarigoldFX.pbr(Color(0.10, 0.06, 0.10), 0.0, 0.95)
+	# v0.9.0: lit-window facades (in-house city texture, UE5 wave) on the
+	# town houses — albedo by day-gloom, emissive windows by night.
+	var hmat := MarigoldFX.pbr_tex(
+		"res://assets/textures/in-house/city/T_CityWindows.png",
+		Color(0.45, 0.34, 0.46), 1.0, 0.95)
+	hmat.emission_enabled = true
+	hmat.emission_texture = hmat.albedo_texture
+	hmat.emission = Color(1.0, 0.72, 0.38)
+	hmat.emission_energy_multiplier = 0.55
+	house_mesh.material = hmat
 	var houses := MultiMesh.new()
 	houses.transform_format = MultiMesh.TRANSFORM_3D
 	houses.mesh = house_mesh

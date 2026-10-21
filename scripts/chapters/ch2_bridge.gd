@@ -392,6 +392,38 @@ func _layout_bridge() -> void:
 	_rings_reached = saved_reached
 	# Lanterns hang from the bridge and rebuild with it.
 	_build_lanterns()
+	_build_wave_dressing()
+
+
+## v0.9.0 UE5-wave dressing: kerosene lamps and a skeleton greeter
+## (Poly Pizza) waiting at the far arch. Built once (the bridge relayout
+## path calls this on mode toggles).
+func _build_wave_dressing() -> void:
+	# _backdrop is created after the first bridge layout in _build(); it
+	# sits at the origin, so the chapter root is an equivalent parent.
+	var parent: Node3D = _backdrop if _backdrop != null else self
+	if parent.get_node_or_null("WaveDressing") != null:
+		return
+	var holder := Node3D.new()
+	holder.name = "WaveDressing"
+	parent.add_child(holder)
+	var end_z := -BRIDGE_LENGTH * 0.5 - 0.5
+	for lx in [-1.7, 1.7]:
+		MarigoldModels.ground_place(holder,
+			MarigoldModels.polypizza_model("lights", "kerosene_lamp_bruno"),
+			Vector3(lx, 0, end_z + 0.6), 0.42, 0.0)
+	var greeter := MarigoldModels.ground_place(holder,
+		MarigoldModels.polypizza_model("skeletons", "skeleton_quaternius"),
+		Vector3(2.3, 0, end_z - 0.4), 1.7, -25.0)
+	# The Quaternius skeleton ships a full clip set — let it wave.
+	if greeter != null:
+		for ap_node in greeter.find_children("", "AnimationPlayer", true, false):
+			var ap := ap_node as AnimationPlayer
+			for anim_name in ap.get_animation_list():
+				if anim_name.contains("Wave"):
+					ap.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
+					ap.play(anim_name)
+					break
 
 
 func _make_ring(pos: Vector3) -> MeshInstance3D:

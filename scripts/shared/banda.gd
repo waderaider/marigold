@@ -60,6 +60,26 @@ static func make_musician(accent: Color, idx: int, seed: int = 0, opts: Dictiona
 		"resp_cd": 0.0}
 
 
+## v0.9.0: hero mariachi — rigged artist GLBs (UE5 ContentStaging wave)
+## with baked "Play"/"Sway" clips, looped with a per-player phase offset.
+## Kinds: guitar, maracas, trumpet, violin. Returns the model root or null.
+static func make_mariachi(kind: String, phase: float = 0.0) -> Node3D:
+	var model := MarigoldModels.artist_model("skeleton_mariachi_" + kind)
+	if model == null:
+		return null
+	model.name = "Mariachi_" + kind
+	for ap_node in model.find_children("", "AnimationPlayer", true, false):
+		var ap := ap_node as AnimationPlayer
+		for anim_name in ["Play", "Sway"]:
+			if ap.has_animation(anim_name):
+				ap.get_animation(anim_name).loop_mode = Animation.LOOP_LINEAR
+		if ap.has_animation("Play"):
+			ap.play("Play")
+			ap.seek(fmod(phase, 4.0), true)
+			ap.speed_scale = 0.95 + fmod(absf(phase) * 0.37, 0.1)
+	return model
+
+
 static func _build_instrument(kind: String, accent: Color) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Instrument_" + kind

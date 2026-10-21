@@ -113,6 +113,7 @@ func setup(ar_mode: bool) -> void:
 	_build_band() # v0.6.0: ambient skeleton street musicians
 	_build_ofrenda_shelf() # v0.6.0: the player's own ofrenda
 	_build_flower_rim() # v0.6.0: real marigold ring around the stage
+	_build_wave_dressing() # v0.9.0: UE5-wave props + crowd billboards
 	_build_teleport_pad() # v0.6.0: petal-arc teleport to the dance floor
 	_build_labels()
 	_build_plaque()
@@ -515,6 +516,40 @@ func _on_eye_contact(rig: MarigoldCharacterRig) -> void:
 		m.call("chime", 88, 0.35)
 
 
+## v0.9.0 UE5-wave dressing: stage props by the hero band and crowd
+## billboards (in-house crowd texture) watching from the plaza dark.
+func _build_wave_dressing() -> void:
+	MarigoldModels.ground_place(_world,
+		MarigoldModels.polypizza_model("instruments", "drum_jeremy"),
+		Vector3(2.9, 0, 2.3), 0.55, 20.0)
+	MarigoldModels.ground_place(_world,
+		MarigoldModels.polypizza_model("instruments", "trumpet_polygoogle"),
+		Vector3(-2.6, 0.02, 3.1), 0.5, 40.0, true)
+	MarigoldModels.ground_place(_world,
+		MarigoldModels.polypizza_model("instruments", "maracas_polygoogle"),
+		Vector3(-1.05, 0.02, 3.15), 0.3, 0.0, true)
+	MarigoldModels.ground_place(_world,
+		MarigoldModels.polypizza_model("hats", "sombrero_polygoogle"),
+		Vector3(-3.0, 0.02, -1.6), 0.42, -25.0, true)
+	var crowd_tex := load("res://assets/textures/in-house/crowd/crowd_billboard_1024x256.png") as Texture2D
+	if crowd_tex != null:
+		for cx in [-5.6, 5.6]:
+			var q := MeshInstance3D.new()
+			var qm := QuadMesh.new()
+			qm.size = Vector2(4.6, 1.15)
+			q.mesh = qm
+			var cm := StandardMaterial3D.new()
+			cm.albedo_texture = crowd_tex
+			cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			cm.alpha_scissor_threshold = 0.5
+			cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			cm.albedo_color = Color(0.55, 0.45, 0.60)
+			q.material_override = cm
+			q.position = Vector3(cx, 0.62, -4.6)
+			q.rotation.y = -signf(cx) * 0.35
+			_world.add_child(q)
+
+
 ## Ambient street band (finding 7): 3 musicians under one umbrella at the
 ## plaza edge. Hard cap respected (3 here + 3 in ch3 = 6 total).
 func _build_band() -> void:
@@ -530,6 +565,16 @@ func _build_band() -> void:
 		_world.add_child(root)
 		d["base_y"] = 0.0
 		_band.append(d)
+	# v0.9.0: the hero mariachi quartet (rigged artist GLBs, baked Play
+	# clips) holds the stage opposite the street band.
+	var hero_kinds := ["guitar", "violin", "trumpet", "maracas"]
+	for i in hero_kinds.size():
+		var hero := MarigoldBanda.make_mariachi(hero_kinds[i], float(i) * 1.37)
+		if hero == null:
+			continue
+		hero.position = Vector3(-3.6 + float(i) * 0.85, 0, 2.6)
+		hero.rotation.y = 2.75
+		_world.add_child(hero)
 
 
 func _update_band(delta: float) -> void:

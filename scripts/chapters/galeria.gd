@@ -77,6 +77,18 @@ func _build() -> void:
 	trim.position = Vector3(0, 3.05, -2.6)
 	_backdrop.add_child(trim)
 	MarigoldModels.make_flower_field(_backdrop, 60, 3.0, 5151).position = Vector3(0, 0, -2.0)
+	# v0.9.0: a rainbow dragon alebrije (hunt wave) guards the gallery.
+	MarigoldModels.ground_place(_backdrop,
+		MarigoldModels.hunt2_model("alebrije_dragon_rainbow_hero"),
+		Vector3(2.7, 0, -1.1), 1.1, -35.0)
+	# v0.9.0: a tin chandelier (Poly Pizza, UE5 wave) lights the gallery.
+	var gchand := MarigoldModels.polypizza_model("lights", "chandelier_creativetrio")
+	if gchand != null:
+		var gcb := MarigoldModels.bounds_of(gchand)
+		var gs := 1.1 / maxf(gcb.size.x, 0.01)
+		gchand.scale = Vector3.ONE * gs
+		gchand.position = Vector3(0, 3.0 - gcb.size.y * gs, -1.3)
+		_backdrop.add_child(gchand)
 	var title := MarigoldFX.make_label("Galeria de Recuerdos", 84, C_GOLD)
 	title.position = Vector3(0, 3.35, -2.5)
 	_stage.add_child(title)

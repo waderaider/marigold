@@ -444,28 +444,33 @@ func _build_ofrenda() -> void:
 		_candles.append(_make_candle(candle_slots[i], candle_variants[i]))
 		_candle_lit.append(false)
 
-	# In-house Blender tall candles (decorative, unlit) flanking tier 1.
-	# Measured AABB: base at +0.09, 0.287m tall.
+	# Decorative (unlit) hero candles flanking tier 1. v0.9.0: the artist
+	# hero candle replaces the in-house tall candle.
 	for cx in [-1.02, 1.02]:
-		var tall := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_tall")
-		if tall == null:
-			continue
-		tall.position = Vector3(cx, 0.545 - 0.09, 0.28)
-		_ofrenda.add_child(tall)
+		MarigoldModels.ground_place(_ofrenda,
+			MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_hero_ivory"),
+			Vector3(cx, 0.50, 0.28), 0.20, 0.0)
 
-	# In-house Blender painted calaveras flanking the altar (mid-ground props).
-	var cal_slots := [
-		{"model": "calavera_a", "x": -1.45},
-		{"model": "calavera_b", "x": 1.45},
-	]
-	for cs in cal_slots:
-		var cal := MarigoldModels.blender_model(MarigoldModels.OFRENDA, String(cs["model"]))
+	# Painted calaveras flanking the altar (mid-ground props). v0.9.0: the
+	# artist hero sugar skull (0.20m, painted PBR) at monument scale
+	# replaces the in-house calavera GLBs.
+	for cx in [-1.45, 1.45]:
+		var cal := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "sugar_skull_hero")
 		if cal == null:
 			continue
-		cal.scale = Vector3(1.4, 1.4, 1.4)
-		cal.position = Vector3(float(cs["x"]), 0.0045 * 1.4, 0.55)
-		cal.rotation.y = -0.35 if float(cs["x"]) < 0.0 else 0.35
+		cal.scale = Vector3(2.0, 2.0, 2.0)
+		cal.position = Vector3(cx, 0.0, 0.55)
+		cal.rotation.y = -0.35 if cx < 0.0 else 0.35
 		_stage.add_child(cal)
+	# v0.9.0: mini sugar skulls keep them company on tier 1.
+	for mx in [-1.15, 1.15]:
+		var mini := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "sugar_skull_mini")
+		if mini == null:
+			continue
+		mini.scale = Vector3(1.6, 1.6, 1.6)
+		mini.position = Vector3(mx, 0.52, 0.30)
+		mini.rotation.y = 0.3 if mx < 0.0 else -0.3
+		_ofrenda.add_child(mini)
 
 	# Decorative food offerings (non-interactive): bread + cups on tier 1.
 	var bread_mat := MarigoldFX.pbr(Color(0.85, 0.62, 0.35), 0.0, 0.85)
@@ -495,6 +500,7 @@ func _build_ofrenda() -> void:
 	_build_marigold_arch()
 	_build_garlands()
 	_scatter_floor_petals()
+	_build_wave_dressing()
 
 
 ## ---------------- abundant offerings ----------------
@@ -535,20 +541,21 @@ func _build_offerings() -> void:
 		var plate := _make_food_plate()
 		plate.position = pos
 		_ofrenda.add_child(plate)
-	# Two ornate in-house Blender photo frames watching over tier 2.
-	# GLBs model the frame lying flat (long axis = local Z); stand upright
-	# with a 6-degree lean-back, yawed slightly toward center.
+	# Two ornate photo frames watching over tier 2. v0.9.0: the carved
+	# frame_tallado hero (UE5 wave; modeled upright, origin at its base)
+	# replaces the in-house frame_a/frame_b GLBs.
 	var frame_defs := [
-		{"model": "frame_a", "x": 0.82, "yaw": -18.0},
-		{"model": "frame_b", "x": -0.82, "yaw": 18.0},
+		{"x": 0.82, "yaw": -18.0},
+		{"x": -0.82, "yaw": 18.0},
 	]
 	for fd in frame_defs:
-		var fmodel := MarigoldModels.blender_model(MarigoldModels.OFRENDA, String(fd["model"]))
+		var fmodel := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "frame_tallado_hero")
 		if fmodel != null:
 			var fpivot := Node3D.new()
-			fmodel.rotation_degrees = Vector3(-84.0, 180.0, 0.0)
+			fmodel.scale = Vector3(1.15, 1.15, 1.15)
+			fmodel.rotation_degrees = Vector3(-6.0, 0.0, 0.0)
 			fpivot.add_child(fmodel)
-			fpivot.position = Vector3(float(fd["x"]), 0.945 + 0.1175, 0.02)
+			fpivot.position = Vector3(float(fd["x"]), 0.945, 0.02)
 			fpivot.rotation.y = deg_to_rad(float(fd["yaw"]))
 			_ofrenda.add_child(fpivot)
 		else:
@@ -560,16 +567,14 @@ func _build_offerings() -> void:
 
 
 func _make_pan_de_muerto() -> Node3D:
-	# In-house Blender hero loaf (measured AABB base at +0.0755, 0.2m wide).
-	var hero := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "pan_de_muerto")
+	# v0.9.0: UE5-wave artist hero loaf (0.26m wide, origin at its base,
+	# full PBR texture set) replaces the in-house loaf.
+	var hero := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "pan_de_muerto_hero")
 	if hero != null:
 		var pivot := Node3D.new()
 		pivot.name = "PanDeMuerto"
-		hero.scale = Vector3(0.85, 0.85, 0.85)
-		hero.position.y = -0.0755 * 0.85
+		hero.scale = Vector3(0.77, 0.77, 0.77) # -> 0.20m wide, as before
 		pivot.add_child(hero)
-		# Baked-bread subsurface read: warm emissive wash on the hero loaf.
-		MarigoldModels.enable_vertex_colors(hero, Color(1.0, 0.72, 0.42), 0.30)
 		return pivot
 	# Fallback: procedural loaf.
 	var root := Node3D.new()
@@ -613,6 +618,21 @@ func _make_pan_de_muerto() -> Node3D:
 func _make_sugar_skull(accent: Color) -> Node3D:
 	var root := Node3D.new()
 	root.name = "SugarSkull"
+	# v0.9.0: artist hero sugar skull (painted PBR, 0.20m tall at scale 1)
+	# replaces the procedural sphere skull.
+	var hero := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "sugar_skull_hero")
+	if hero != null:
+		hero.scale = Vector3(0.65, 0.65, 0.65) # -> 0.13m, matching the old prop
+		root.add_child(hero)
+		var flower2 := SphereMesh.new()
+		flower2.radius = 0.014
+		flower2.height = 0.025
+		var fmi2 := MeshInstance3D.new()
+		fmi2.mesh = flower2
+		fmi2.material_override = MarigoldFX.glow(accent, 2.0)
+		fmi2.position = Vector3(0, 0.128, 0.030)
+		root.add_child(fmi2)
+		return root
 	var skull := SphereMesh.new()
 	skull.radius = 0.062
 	skull.height = 0.13
@@ -645,15 +665,21 @@ func _make_sugar_skull(accent: Color) -> Node3D:
 func _make_copal() -> Node3D:
 	var root := Node3D.new()
 	root.name = "CopalBurner"
-	var bowl := CylinderMesh.new()
-	bowl.top_radius = 0.075
-	bowl.bottom_radius = 0.05
-	bowl.height = 0.06
-	var bmi := MeshInstance3D.new()
-	bmi.mesh = bowl
-	bmi.material_override = MarigoldFX.pbr(Color(0.25, 0.12, 0.08), 0.0, 0.8)
-	bmi.position.y = 0.03
-	root.add_child(bmi)
+	# v0.9.0: artist sahumador (copal burner) GLB replaces the cylinder bowl;
+	# ember + smoke effects below are kept.
+	var burner := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "sahumador")
+	if burner != null:
+		root.add_child(burner)
+	else:
+		var bowl := CylinderMesh.new()
+		bowl.top_radius = 0.075
+		bowl.bottom_radius = 0.05
+		bowl.height = 0.06
+		var bmi := MeshInstance3D.new()
+		bmi.mesh = bowl
+		bmi.material_override = MarigoldFX.pbr(Color(0.25, 0.12, 0.08), 0.0, 0.8)
+		bmi.position.y = 0.03
+		root.add_child(bmi)
 	var ember_mat := MarigoldFX.glow(Color(1.0, 0.45, 0.10), 2.5)
 	var ember := SphereMesh.new()
 	ember.radius = 0.030
@@ -661,7 +687,7 @@ func _make_copal() -> Node3D:
 	var emi := MeshInstance3D.new()
 	emi.mesh = ember
 	emi.material_override = ember_mat
-	emi.position.y = 0.065
+	emi.position.y = 0.105 # v0.9.0: seated in the sahumador's bowl
 	root.add_child(emi)
 	_ember_mats.append(ember_mat)
 	# Looping smoke wisps.
@@ -669,7 +695,7 @@ func _make_copal() -> Node3D:
 	smoke.amount = 18
 	smoke.lifetime = 3.2
 	smoke.preprocess = 3.2
-	smoke.position.y = 0.09
+	smoke.position.y = 0.14
 	var pm := ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 	pm.emission_sphere_radius = 0.03
@@ -704,6 +730,13 @@ func _make_copal() -> Node3D:
 func _make_water_glass() -> Node3D:
 	var root := Node3D.new()
 	root.name = "WaterGlass"
+	# v0.9.0: artist water glass GLB (real glass + water PBR) replaces the
+	# procedural cylinders.
+	var glass_model := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "water_glass")
+	if glass_model != null:
+		glass_model.scale = Vector3(1.35, 1.35, 1.35) # 0.09m -> 0.12m tall
+		root.add_child(glass_model)
+		return root
 	var glass := CylinderMesh.new()
 	glass.top_radius = 0.045
 	glass.bottom_radius = 0.038
@@ -732,6 +765,14 @@ func _make_water_glass() -> Node3D:
 func _make_salt_dish() -> Node3D:
 	var root := Node3D.new()
 	root.name = "SaltDish"
+	# v0.9.0: artist salt dish GLB (dish + salt mound, PBR) replaces the
+	# procedural dish and salt sphere; the glitter quads below still apply.
+	var dish_model := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "salt_dish")
+	if dish_model != null:
+		dish_model.scale = Vector3(1.4, 1.4, 1.4) # 0.082m -> 0.115m wide
+		root.add_child(dish_model)
+		_add_salt_glitter(root)
+		return root
 	var dish := CylinderMesh.new()
 	dish.top_radius = 0.062
 	dish.bottom_radius = 0.045
@@ -756,8 +797,13 @@ func _make_salt_dish() -> Node3D:
 	smi.scale = Vector3(1.0, 0.45, 1.0)
 	smi.position.y = 0.025
 	root.add_child(smi)
-	# v0.7.0 P1: glitter sparkle — 7 tiny emissive quads scattered on the
-	# salt surface so the candlelight catches individual grains.
+	_add_salt_glitter(root)
+	return root
+
+
+## v0.7.0 P1: glitter sparkle — 7 tiny emissive quads scattered on the
+## salt surface so the candlelight catches individual grains.
+func _add_salt_glitter(root: Node3D) -> void:
 	var grng := RandomNumberGenerator.new()
 	grng.seed = 4242
 	for gi in 7:
@@ -773,12 +819,26 @@ func _make_salt_dish() -> Node3D:
 		gq.rotation_degrees.x = -90.0
 		gq.rotation.z = grng.randf() * TAU
 		root.add_child(gq)
-	return root
 
 
 func _make_food_plate() -> Node3D:
 	var root := Node3D.new()
 	root.name = "FoodPlate"
+	# v0.9.0: artist mole bowl + tamal GLBs replace the procedural plate.
+	var bowl := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "bowl_mole_hero")
+	if bowl != null:
+		root.add_child(bowl)
+		var tamal_kinds := ["tamal_a", "tamal_b", "tamal_c"]
+		for i in 3:
+			var tm := MarigoldModels.blender_model(MarigoldModels.OFRENDA, tamal_kinds[i])
+			if tm == null:
+				continue
+			tm.scale = Vector3(0.8, 0.8, 0.8)
+			var ta := float(i) / 3.0 * TAU + 0.5
+			tm.position = Vector3(cos(ta) * 0.14, 0.0, sin(ta) * 0.14)
+			tm.rotation.y = -ta
+			root.add_child(tm)
+		return root
 	var plate := CylinderMesh.new()
 	plate.top_radius = 0.115
 	plate.bottom_radius = 0.085
@@ -860,6 +920,10 @@ func _build_marigold_arch() -> void:
 		var altar := MarigoldModels.place(arch, MarigoldModels.GRAVEYARD, "altar-stone", Vector3(sx * 1.85, 0, 0.35), sx * 18.0, 0.9)
 		if altar != null:
 			MarigoldModels.recolor(altar, Color(0.52, 0.48, 0.55), 0.05, 0.85)
+	# v0.9.0: a real bell (Poly Pizza, UE5 wave) hangs at the arch apex.
+	MarigoldModels.ground_place(arch,
+		MarigoldModels.polypizza_model("architecture", "bell_quaternius"),
+		Vector3(0, 2.02, 0), 0.32, 0.0)
 
 
 ## Marigold garlands swagged across each tier's front edge.
@@ -877,19 +941,20 @@ func _build_garlands() -> void:
 		var top: float = tier["top"]
 		var z: float = tier["z"]
 		if w > 2.0:
-			# In-house Blender marigold garland tiled across the wide tier-1
-			# edge (tileable 0.822m segment, bushy z). Middle tile swags lower.
-			var g0 := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland")
+			# Marigold garland tiled across the wide tier-1 edge. v0.9.0:
+			# the artist hero garland (0.825m segment, origin 0.1885 left of
+			# center) replaces the in-house garland. Middle tile swags lower.
+			var g0 := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland_marigold_hero")
 			if g0 != null:
-				var seg_w := 0.822
+				var seg_w := 0.825
 				var n := 3
 				var sx: float = w / (seg_w * n)
 				for gi in n:
-					var g := g0 if gi == 0 else MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland")
+					var g := g0 if gi == 0 else MarigoldModels.blender_model(MarigoldModels.OFRENDA, "garland_marigold_hero")
 					if g == null:
 						continue
 					g.scale.x = sx
-					g.position = Vector3((float(gi) - 1.0) * seg_w * sx, top - 0.06 - (0.025 if gi == 1 else 0.0), z + 0.01)
+					g.position = Vector3((float(gi) - 1.0) * seg_w * sx - 0.1885 * sx, top - 0.06 - (0.025 if gi == 1 else 0.0), z + 0.01)
 					_ofrenda.add_child(g)
 				continue
 		for i in 13:
@@ -904,6 +969,67 @@ func _build_garlands() -> void:
 			var bs := rng.randf_range(0.9, 1.3)
 			blossom.scale = Vector3.ONE * bs
 			_ofrenda.add_child(blossom)
+
+
+## v0.9.0 UE5-wave dressing: chandelier, tin lanterns, hero marigold
+## clusters, a second shrine, rug, flowers and Poly Pizza dishware/lights.
+func _build_wave_dressing() -> void:
+	var chand := MarigoldModels.artist_model("chandelier_hero")
+	if chand != null:
+		var cb := MarigoldModels.bounds_of(chand)
+		chand.position = Vector3(0, 3.35 - cb.size.y, -0.2)
+		_stage.add_child(chand)
+	for lx in [-2.05, 2.05]:
+		MarigoldModels.ground_place(_stage,
+			MarigoldModels.artist_model("lantern_hojalata_hero"),
+			Vector3(lx, 0, 0.85), 0.47, 0.0)
+	for cx in [-1.55, 1.55]:
+		MarigoldModels.ground_place(_ofrenda,
+			MarigoldModels.artist_model("marigold_cluster_hero"),
+			Vector3(cx, 0.0, 0.95), 0.33, cx * 40.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("ofrenda", "shrine_kaylousberg"),
+		Vector3(-2.7, 0, -0.55), 1.15, 18.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("textiles", "oriental_rug_jeremy"),
+		Vector3(0, 0.012, 1.75), 2.6, 0.0, true)
+	MarigoldModels.ground_place(_ofrenda,
+		MarigoldModels.polypizza_model("dishes", "bowl_zsky"),
+		Vector3(-0.48, 0.52, 0.34), 0.17, 0.0, true)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("lights", "lampara_redessociales"),
+		Vector3(2.55, 0, -0.5), 0.55, -15.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("flowers", "desert_marigold"),
+		Vector3(-1.85, 0, 1.25), 0.4, 40.0)
+	MarigoldModels.ground_place(_stage,
+		MarigoldModels.polypizza_model("flowers", "flower_group_quaternius"),
+		Vector3(1.85, 0, 1.25), 0.4, -70.0)
+	for sx in [-0.55, 0.55]:
+		MarigoldModels.ground_place(_ofrenda,
+			MarigoldModels.polypizza_model("lights", "candle_stick_polygoogle"),
+			Vector3(sx, 1.30, 0.16), 0.22, 0.0)
+	for px in [-0.7, 0.15, 0.8]:
+		MarigoldModels.ground_place(_stage,
+			MarigoldModels.artist_model("flower_petal_quaternius"),
+			Vector3(px, 0.012, 1.15), 0.3, px * 40.0, true)
+	# Talavera tile strips (in-house PBR) dress each tier's front face.
+	var talavera := [
+		["tile_01_floral", 2.28, 0.50, 0.615],
+		["tile_02_diamond", 1.78, 0.90, 0.515],
+		["tile_03_medallion", 1.28, 1.30, 0.415],
+	]
+	for t in talavera:
+		var strip := MeshInstance3D.new()
+		var pm := QuadMesh.new()
+		pm.size = Vector2(float(t[1]) - 0.08, 0.17)
+		strip.mesh = pm
+		strip.material_override = MarigoldFX.pbr_tex(
+			"res://assets/textures/in-house/talavera/%s_albedo.png" % String(t[0]),
+			Color(0.85, 0.85, 0.9), float(t[1]) * 2.2, 0.4,
+			"res://assets/textures/in-house/talavera/%s_normal.png" % String(t[0]))
+		strip.position = Vector3(0, float(t[2]) - 0.095, float(t[3]))
+		_ofrenda.add_child(strip)
 
 
 ## Scattered fallen petals around the ofrenda base.
@@ -1095,6 +1221,8 @@ render_mode unshaded, cull_disabled;
 uniform vec4 bg : source_color = vec4(0.07, 0.04, 0.12, 1.0);
 uniform vec4 glow_col : source_color = vec4(1.0, 0.6, 0.15, 1.0);
 uniform float seed = 0.0;
+uniform sampler2D portrait_tex;
+uniform float portrait_mix = 0.0;
 void fragment() {
 	vec2 p = UV - vec2(0.5, 0.66);
 	float head = length(p * vec2(1.0 + seed * 0.15, 1.25)) - (0.13 + seed * 0.02);
@@ -1104,16 +1232,24 @@ void fragment() {
 	float d = min(head, shoulders);
 	float sil = smoothstep(0.015, -0.015, d);
 	float ring = smoothstep(0.03, 0.0, abs(halo)) * 0.8;
-	vec3 col = mix(bg.rgb, glow_col.rgb, sil);
+	// v0.9.0: painted ancestor portraits (in-house, UE5 wave) take over
+	// from the abstract silhouette when present; the ignite glow stays.
+	vec3 pcol = texture(portrait_tex, UV).rgb;
+	vec3 col = mix(mix(bg.rgb, glow_col.rgb, sil), pcol, portrait_mix);
 	col += glow_col.rgb * ring;
 	ALBEDO = col;
-	EMISSION = glow_col.rgb * (sil * 0.7 + ring * 0.9);
+	EMISSION = glow_col.rgb * (sil * 0.7 + ring * 0.9) + pcol * portrait_mix * 0.35;
 }
 """
 	var sm := ShaderMaterial.new()
 	sm.shader = sh
 	sm.set_shader_parameter("glow_col", tints[variant % tints.size()])
 	sm.set_shader_parameter("seed", float(variant) * 0.5)
+	var portrait_names := ["abuela_rosa", "abuelo_tomas", "tia_luz"]
+	var portrait_path := "res://assets/textures/in-house/portraits/%s.png" % portrait_names[variant % portrait_names.size()]
+	if ResourceLoader.exists(portrait_path):
+		sm.set_shader_parameter("portrait_tex", load(portrait_path) as Texture2D)
+		sm.set_shader_parameter("portrait_mix", 1.0)
 	photo.material = sm
 	var photo_mi := MeshInstance3D.new()
 	photo_mi.mesh = photo
@@ -1145,19 +1281,29 @@ func _make_candle(slot: Vector3, variant: String) -> Node3D:
 	root.name = "Candle"
 	root.position = slot
 	_ofrenda.add_child(root)
-	# Measured GLB bases (origin sits below the wax) and FlameAnchor heights.
+	# v0.9.0: the artist hero candle (UE5 wave) in tall/mid/short scales,
+	# on a WaxPivot so CandleMelt can melt it about its base while the
+	# flame kit sinks with the wick. Measured in-engine (probe_090): the
+	# hero GLB's origin is at its base, wax top 0.1531, radius 0.0397;
+	# variant scales match the old candles' heights (0.192/0.142/0.102).
+	# (The pre-v0.9.0 defs were stale — flames floated ~10cm over the wick.)
 	var defs := {
-		"tall": {"base": 0.090, "anchor": 0.384},
-		"mid": {"base": 0.065, "anchor": 0.284},
-		"short": {"base": 0.045, "anchor": 0.204},
+		"tall": {"s": 1.30},
+		"mid": {"s": 0.95},
+		"short": {"s": 0.70},
 	}
 	var d: Dictionary = defs.get(variant, defs["mid"])
-	var base: float = d["base"]
-	var anchor: float = float(d["anchor"]) - base
-	var model := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_" + variant)
+	var cs: float = d["s"]
+	var anchor: float = 0.1531 * cs + 0.006
+	var melt_top: float = 0.1531 * cs
+	var melt_radius: float = 0.0397 * cs
+	var pivot := Node3D.new()
+	pivot.name = "WaxPivot"
+	root.add_child(pivot)
+	var model := MarigoldModels.blender_model(MarigoldModels.OFRENDA, "candle_hero_ivory")
 	if model != null:
-		model.position.y = -base
-		root.add_child(model)
+		model.scale = Vector3.ONE * cs
+		pivot.add_child(model)
 	else:
 		var wax := CylinderMesh.new()
 		wax.top_radius = 0.035
@@ -1167,7 +1313,7 @@ func _make_candle(slot: Vector3, variant: String) -> Node3D:
 		wax_mi.mesh = wax
 		wax_mi.material_override = MarigoldFX.pbr(Color(0.95, 0.88, 0.75), 0.0, 0.6)
 		wax_mi.position.y = 0.11
-		root.add_child(wax_mi)
+		pivot.add_child(wax_mi)
 		var wick := CylinderMesh.new()
 		wick.top_radius = 0.006
 		wick.bottom_radius = 0.006
@@ -1176,8 +1322,10 @@ func _make_candle(slot: Vector3, variant: String) -> Node3D:
 		wick_mi.mesh = wick
 		wick_mi.material_override = MarigoldFX.pbr(Color(0.08, 0.06, 0.05), 0.0, 0.9)
 		wick_mi.position.y = 0.235
-		root.add_child(wick_mi)
+		pivot.add_child(wick_mi)
 		anchor = 0.25
+		melt_top = 0.22
+		melt_radius = 0.042
 	# Flame kit at the FlameAnchor, hidden until lit.
 	var kit := Node3D.new()
 	kit.name = "FlameKit"
@@ -1216,6 +1364,15 @@ func _make_candle(slot: Vector3, variant: String) -> Node3D:
 	_flame_nodes.append(kit)
 	_flame_mats.append(flame_mat)
 	_candle_anchors.append(anchor)
+	# v0.9.0: register with CandleMelt (lit = flame kit visible).
+	root.add_to_group("marigold_candles")
+	root.set_meta("melt_wax", pivot)
+	root.set_meta("melt_sinks", [kit])
+	root.set_meta("melt_lit_mode", "anchor")
+	root.set_meta("melt_anchor", kit)
+	root.set_meta("melt_top", melt_top)
+	root.set_meta("melt_radius", melt_radius)
+	root.set_meta("melt_glow_mats", [flame_mat])
 	return root
 
 
@@ -1234,6 +1391,8 @@ func _light_candle(idx: int) -> void:
 		var l := MarigoldFX.make_point_light(_candles[idx], Vector3(0, _candle_anchors[idx], 0), Color(1.0, 0.62, 0.25), 0.9, 3.5)
 		_candle_lights.append({"light": l, "base": 0.9, "phase": randf() * TAU})
 		_lights_used += 1
+		# v0.9.0: CandleMelt adopts the light (it sinks with the wick).
+		(_candles[idx] as Node3D).set_meta("melt_light", l)
 	MarigoldFX.spawn_sparks(self, _candles[idx].global_position + Vector3(0, _candle_anchors[idx], 0), Color(1.0, 0.7, 0.2), 12)
 	MarigoldHaptics.thump()
 	_sfx(48, 0.8, 1.6)

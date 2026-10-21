@@ -67,6 +67,7 @@ func _ready() -> void:
 	_rng.seed = 4242
 	_build_corridor()
 	_build_gates_and_arch()
+	_build_wave_dressing()
 	_build_path()
 	_build_ui()
 	MarigoldFX.spawn_ambient_motes(self, Vector3(0, 1.6, -5), 6.0, 80)
@@ -316,6 +317,30 @@ func _add_banner(parent: Node3D, width: float, height: float, col: Color, pos: V
 		"home_pos": pos, "home_yaw": 0.0,
 		"fixed": false,
 	})
+
+
+## v0.9.0 UE5-wave dressing: two large banners in the artist papel-picado
+## atlas (MarigoldPapelPicado.banner_material) flank the arch, over a
+## serape runner (in-house serape PBR) down the corridor.
+func _build_wave_dressing() -> void:
+	for i in 2:
+		var b := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(1.5, 0.9)
+		b.mesh = qm
+		b.material_override = MarigoldPapelPicado.banner_material(9100 + i)
+		b.position = Vector3(-2.3 + float(i) * 4.6, 2.6, -2.4)
+		b.rotation.y = -0.3 if i == 0 else 0.3
+		add_child(b)
+	var runner := MeshInstance3D.new()
+	var rm := PlaneMesh.new()
+	rm.size = Vector2(1.6, 7.0)
+	runner.mesh = rm
+	runner.material_override = MarigoldFX.pbr_tex(
+		"res://assets/textures/in-house/serape/serape_stripes_1K_albedo.png",
+		Color(0.9, 0.85, 0.85), 3.0, 0.95)
+	runner.position = Vector3(0, 0.015, -3.5)
+	add_child(runner)
 
 
 func _build_gates_and_arch() -> void:

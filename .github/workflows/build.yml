@@ -107,13 +107,13 @@ jobs:
       - name: Zip Windows build
         run: |
           cd builds/Marigold-Windows
-          zip -r ../Marigold-v0.8.0-windows.zip .
+          zip -r ../Marigold-v0.9.0-windows.zip .
           cd ../..
-          ls -lh builds/Marigold-v0.8.0-windows.zip
+          ls -lh builds/Marigold-v0.9.0-windows.zip
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4
         with:
           name: Marigold-Windows
-          path: builds/Marigold-v0.8.0-windows.zip
+          path: builds/Marigold-v0.9.0-windows.zip
           if-no-files-found: error

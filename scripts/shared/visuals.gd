@@ -16,6 +16,38 @@ static func pbr(color: Color, metallic: float = 0.0, roughness: float = 0.5) -> 
 	return m
 
 
+static var _tex_cache := {}
+
+
+## v0.9.0: textured PBR material from the UE5 ContentStaging wave
+## (ambientCG + in-house sets). Missing files degrade to flat pbr().
+static func pbr_tex(albedo_path: String, tint: Color = Color.WHITE,
+		uv_scale: float = 1.0, roughness: float = 0.85,
+		normal_path: String = "", rough_path: String = "") -> StandardMaterial3D:
+	if not ResourceLoader.exists(albedo_path):
+		return pbr(tint, 0.0, roughness)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = tint
+	m.albedo_texture = _tex(albedo_path)
+	m.roughness = roughness
+	if normal_path != "" and ResourceLoader.exists(normal_path):
+		m.normal_enabled = true
+		m.normal_texture = _tex(normal_path)
+	if rough_path != "" and ResourceLoader.exists(rough_path):
+		m.roughness_texture = _tex(rough_path)
+	if uv_scale != 1.0:
+		m.uv1_scale = Vector3(uv_scale, uv_scale, 1.0)
+	return m
+
+
+static func _tex(path: String) -> Texture2D:
+	if _tex_cache.has(path):
+		return _tex_cache[path]
+	var t := load(path) as Texture2D
+	_tex_cache[path] = t
+	return t
+
+
 ## Named PBR presets: "plastic", "metal", "glass", "matte", "rubber", "neon".
 static func pbr_preset(color: Color, preset: String = "plastic") -> StandardMaterial3D:
 	match preset:
@@ -292,7 +324,15 @@ static func make_marigold_field(parent: Node3D, count: int = 220, radius: float 
 	blossom.height = 0.12
 	blossom.radial_segments = 8
 	blossom.rings = 4
-	blossom.material = glow(Color(1.0, 0.55, 0.08), 1.6)
+	# v0.9.0: marigold flower PBR (AI-test set, UE5 wave) on the blossoms.
+	var bmat := glow(Color(1.0, 0.55, 0.08), 1.6)
+	if ResourceLoader.exists("res://assets/textures/ai_tests/marigold_flower_albedo.png"):
+		bmat.albedo_texture = _tex("res://assets/textures/ai_tests/marigold_flower_albedo.png")
+		bmat.emission_texture = bmat.albedo_texture
+		if ResourceLoader.exists("res://assets/textures/ai_tests/marigold_flower_normal.png"):
+			bmat.normal_enabled = true
+			bmat.normal_texture = _tex("res://assets/textures/ai_tests/marigold_flower_normal.png")
+	blossom.material = bmat
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = blossom
@@ -400,6 +440,20 @@ void fragment() {
 
 
 ## Candle with flame particles and a warm point light. Budget lights!
+
+## v0.9.0: petal material with the real marigold petal texture (in-house,
+## UE5 wave) alpha-cut over the emissive glow.
+static func _petal_material(energy: float) -> StandardMaterial3D:
+	var m := glow(Color(1.0, 0.65, 0.12), energy)
+	if ResourceLoader.exists("res://assets/textures/in-house/petal/marigold_petal_256.png"):
+		var pt := _tex("res://assets/textures/in-house/petal/marigold_petal_256.png")
+		m.albedo_texture = pt
+		m.emission_texture = pt
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.alpha_scissor_threshold = 0.4
+	return m
+
+
 static func make_candle(parent: Node3D, pos: Vector3, with_light: bool = true, light_energy: float = 0.9) -> Node3D:
 	var root := Node3D.new()
 	root.position = pos
@@ -408,7 +462,12 @@ static func make_candle(parent: Node3D, pos: Vector3, with_light: bool = true, l
 	wax.top_radius = 0.035
 	wax.bottom_radius = 0.04
 	wax.height = 0.22
-	wax.material = pbr(Color(0.95, 0.88, 0.75), 0.0, 0.6)
+	# v0.9.0: real wax PBR set (in-house, UE5 wave) on the procedural candle.
+	wax.material = pbr_tex(
+		"res://assets/textures/in-house/wax/candle_wax_512_albedo.png",
+		Color(0.95, 0.88, 0.75), 2.0, 0.6,
+		"res://assets/textures/in-house/wax/candle_wax_512_normal.png",
+		"res://assets/textures/in-house/wax/candle_wax_512_roughness.png")
 	var wax_mi := MeshInstance3D.new()
 	wax_mi.mesh = wax
 	wax_mi.position.y = 0.11
@@ -443,8 +502,25 @@ static func make_candle(parent: Node3D, pos: Vector3, with_light: bool = true, l
 	p.draw_pass_1 = quad
 	root.add_child(p)
 	p.emitting = true
+	var candle_light: OmniLight3D = null
 	if with_light:
-		make_point_light(root, Vector3(0, 0.35, 0), Color(1.0, 0.62, 0.25), light_energy, 3.5)
+		candle_light = make_point_light(root, Vector3(0, 0.35, 0), Color(1.0, 0.62, 0.25), light_energy, 3.5)
+	# v0.9.0: register with the CandleMelt autoload (UE5 Living Wax port).
+	# The wax mesh scales about its base; flame, particles and light sink
+	# with the wick. Procedural candles are always lit.
+	root.add_to_group("marigold_candles")
+	root.set_meta("melt_wax", wax_mi)
+	var sinks: Array = [flame_mi, p]
+	if candle_light != null:
+		sinks.append(candle_light)
+		root.set_meta("melt_light", candle_light)
+	root.set_meta("melt_sinks", sinks)
+	root.set_meta("melt_lit_mode", "always")
+	root.set_meta("melt_top", 0.22)
+	root.set_meta("melt_radius", 0.04)
+	var fmat := flame_mi.get_active_material(0)
+	if fmat is StandardMaterial3D:
+		root.set_meta("melt_glow_mats", [fmat])
 	return root
 
 
@@ -579,7 +655,7 @@ static func petal_ceiling_fall(parent: Node, center: Vector3, radius: float = 2.
 	p.process_material = mat
 	var quad := QuadMesh.new()
 	quad.size = Vector2(0.05, 0.035)
-	quad.material = glow(Color(1.0, 0.65, 0.12), 1.6)
+	quad.material = _petal_material(1.6)
 	p.draw_pass_1 = quad
 	parent.add_child(p)
 	p.emitting = true
@@ -625,7 +701,7 @@ static func scatter_petals(parent: Node, pos: Vector3, amount: int = 30) -> GPUP
 	p.process_material = mat
 	var quad := QuadMesh.new()
 	quad.size = Vector2(0.05, 0.035)
-	quad.material = glow(Color(1.0, 0.65, 0.12), 1.8)
+	quad.material = _petal_material(1.8)
 	p.draw_pass_1 = quad
 	parent.add_child(p)
 	p.emitting = true
