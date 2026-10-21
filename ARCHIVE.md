@@ -13,8 +13,10 @@ the per-version changelog files shipped with each build.
 
 | Product line | Version | Date | Link |
 |---|---|---|---|
+| MARIGOLD (Godot, Quest + PC) | v0.9.2 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.9.2) |
+| MARIGOLD (Godot, Quest + PC) | v0.9.1 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.9.1) |
+| MARIGOLD (Godot, Quest + PC) | v0.9.0 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.9.0) |
 | MARIGOLD (Godot, Quest + PC) | v0.8.0 | 2026-10-16 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.8.0) |
-| MARIGOLD (Godot, Quest + PC) | v0.7.0 | 2026-10-12 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.7.0) |
 | MARIGOLD UE5 RTX Demo | ue5-demo-v0.5.0 | 2026-10-20 | [Release](https://github.com/waderaider/marigold/releases/tag/ue5-demo-v0.5.0) |
 | MARIGOLD UE5 RTX Demo | ue5-demo-v0.4.0 | 2026-10-20 | [Release](https://github.com/waderaider/marigold/releases/tag/ue5-demo-v0.4.0) |
 | MarigoldGPUTest | gputest-v1.0.0 | 2026-10-19 | [Release](https://github.com/waderaider/marigold/releases/tag/gputest-v1.0.0) |
@@ -23,6 +25,7 @@ the per-version changelog files shipped with each build.
 
 | Version | Date | What shipped |
 |---|---|---|
+| v0.7.0 | 2026-10-12 | "The FEEL update" — first Windows PC VR build (Virtual Desktop); static 2D pause grid, real settings page, universal laser teleport, telemetry boot event + crash reporter. Assets: `Marigold-v0.7.0.apk`, `Marigold-v0.7.0-windows.zip` |
 | v0.6.2 | 2026-10-09 | "The Menu Fix" — one simple 2D list launcher (LAUNCHER LAW); fixed clipped buttons and the missing laser pointer from v0.6.1. Asset: `Marigold-v0.6.2.apk` |
 | v0.6.1 | 2026-10-08 | Gameplay telemetry framework + dedicated key art for Pinta Alebrijes, Galería, and the ofrenda finale. Asset: `Marigold-v0.6.1.apk` |
 | v0.6.0 | 2026-10-08 | "The Faces Version" — procedural character face system (blink, look-at, expressions, jaw/lip movement) + the 8 Coco VR design-pattern findings. Asset: `Marigold-v0.6.0.apk` |
