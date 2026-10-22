@@ -49,9 +49,10 @@ void fragment() {
 func _process(delta: float) -> void:
 	if _quad == null:
 		return
-	# Ease toward target (0.4s).
-	var rate := delta / 0.4
-	_current = lerpf(_current, _target, minf(1.0, rate))
+	# Ease toward target (0.4s time constant). v0.9.3 (E7): exponential
+	# damp instead of delta/0.4 lerp - frame-rate independent (the lerp
+	# form eased twice as fast at 144 Hz as at 72 Hz).
+	_current = lerpf(_current, _target, 1.0 - exp(-delta * 2.5))
 	if _current < 0.01:
 		_quad.visible = false
 		return

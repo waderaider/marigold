@@ -15,10 +15,15 @@ const DEFAULT_MANIFEST_URL := "https://raw.githubusercontent.com/waderaider/mari
 
 var manifest_url := DEFAULT_MANIFEST_URL
 var current_version := "0.1.0"
-var current_version_code := 1
+# Sourced from project.godot config/version_code in _ready (v0.9.3).
+# Default 0 = "unknown": _is_newer then falls back to the version-string
+# comparison instead of the code branch (the old hardcoded 1 made every
+# manifest look newer than the installed build, forever).
+var current_version_code := 0
 
 var _http: HTTPRequest
 var _download_path := ""
+var _dl: HTTPRequest = null
 
 func _ready() -> void:
 	_http = HTTPRequest.new()
@@ -28,6 +33,7 @@ func _ready() -> void:
 	var vname: String = ProjectSettings.get_setting("application/config/version", "0.1.0")
 	if vname and vname != "":
 		current_version = vname
+	current_version_code = int(ProjectSettings.get_setting("application/config/version_code", 0))
 
 ## Check for updates. Emits check_completed.
 func check_for_updates(url: String = "") -> void:
@@ -47,7 +53,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		check_completed.emit(false, "", "Invalid version manifest")
 		return
 	var data: Dictionary = json
-	var latest: String = data["version"]
+	var latest: String = str(data.get("version", ""))
 	var latest_code := int(data.get("version_code", 0))
 	var changelog: String = data.get("changelog", "No changelog available.")
 	var has_update := _is_newer(latest, latest_code)
@@ -79,16 +85,31 @@ func download_update() -> void:
 		return
 	_download_path = OS.get_user_data_dir() + "/marigold-update.apk"
 	# Use a separate HTTPRequest for download to track progress.
-	var dl := HTTPRequest.new()
-	dl.download_file = _download_path
-	add_child(dl)
-	dl.request_completed.connect(_on_download_completed.bind(dl))
-	var err := dl.request(apk_url)
+	_dl = HTTPRequest.new()
+	_dl.download_file = _download_path
+	add_child(_dl)
+	_dl.request_completed.connect(_on_download_completed.bind(_dl))
+	var err := _dl.request(apk_url)
 	if err != OK:
 		download_failed.emit("Failed to start download: %s" % err)
-		dl.queue_free()
+		_dl.queue_free()
+		_dl = null
+	else:
+		set_process(true)
+
+
+func _process(_delta: float) -> void:
+	# Poll the in-flight download so download_progress actually fires
+	# (the signal was declared in v0.1.0 but never emitted until v0.9.3).
+	if _dl == null:
+		set_process(false)
+		return
+	download_progress.emit(_dl.get_downloaded_bytes(), _dl.get_body_size())
 
 func _on_download_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray, dl: HTTPRequest) -> void:
+	if dl == _dl:
+		_dl = null
+		set_process(false)
 	dl.queue_free()
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		download_failed.emit("Download failed (HTTP %d)" % response_code)

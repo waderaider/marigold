@@ -124,6 +124,15 @@ func _enter_mode(mode: int) -> void:
 ## same code (VR path byte-for-byte).
 func _enter_vr_mode() -> bool:
 	_xr = XRServer.find_interface("OpenXR")
+	# v0.9.3: fixed foveated rendering must be set BEFORE initialize()
+	# (skills audit E2). Gated on hardware support; the level comes from
+	# the quality table (Quest Low/Medium; 0 whenever glow is on, since
+	# glow post-effects disable foveation in the OpenXR path anyway).
+	if _xr != null and _xr is OpenXRInterface:
+		var oxr := _xr as OpenXRInterface
+		if oxr.is_foveation_supported():
+			oxr.foveation_level = MarigoldGfx.foveation_level()
+			oxr.foveation_dynamic = true
 	if _xr != null and _xr.initialize():
 		get_viewport().use_xr = true
 		$XROrigin3D/XRCamera3D.current = true
@@ -211,6 +220,9 @@ func _show_boot_chooser(warn: String = "") -> void:
 			"Quest via Virtual Desktop")
 	vr_btn.pressed.connect(_on_chooser_pick.bind(MarigoldState.LaunchMode.VR))
 	vb.add_child(vr_btn)
+	# v0.9.3 (input audit U1): the chooser is the first screen of the
+	# Windows build - a pad/keyboard user must land on a focused control.
+	pc_btn.grab_focus()
 	var ver := Label.new()
 	ver.text = "v" + str(ProjectSettings.get_setting(
 			"application/config/version", "0.0.0"))
@@ -236,10 +248,18 @@ func _chooser_button(main_text: String, sub_text: String) -> Button:
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("pressed", hover)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	# v0.9.3 (input audit U1): VISIBLE focus - accent fill + cream border,
+	# same recipe as menu.gd's _focus_style. StyleBoxEmpty left the
+	# gamepad/keyboard user with no idea what was selected.
+	var focus := normal.duplicate() as StyleBoxFlat
+	focus.bg_color = Color(1.0, 0.62, 0.106)
+	focus.border_color = Color(1.0, 0.965, 0.910)
+	focus.set_border_width_all(5)
+	b.add_theme_stylebox_override("focus", focus)
 	var vb := VBoxContainer.new()
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
 	b.add_child(vb)
 	var l1 := Label.new()
 	l1.text = main_text
@@ -265,6 +285,28 @@ func _on_chooser_pick(mode: int) -> void:
 		_chooser.queue_free()
 		_chooser = null
 	_enter_mode(mode)
+
+
+## v0.9.3 (input audit U1): while the boot chooser is open, translate a
+## gamepad A press into ui_accept - probe_092 proved the engine-default
+## ui_accept has NO joypad binding, so without this the pad can move
+## focus (default ui_* nav bindings) but never confirm. The chooser
+## lives in the root viewport, so a viewport push reaches the focused
+## button natively.
+func _input(event: InputEvent) -> void:
+	if _chooser == null:
+		return
+	if event is InputEventJoypadButton:
+		var jb := event as InputEventJoypadButton
+		if jb.pressed and jb.button_index == JOY_BUTTON_A:
+			var acc := InputEventAction.new()
+			acc.action = &"ui_accept"
+			acc.pressed = true
+			get_viewport().push_input(acc)
+			var rel := InputEventAction.new()
+			rel.action = &"ui_accept"
+			rel.pressed = false
+			get_viewport().push_input(rel)
 
 
 ## ---- PC first-run onboarding (v0.8.0) ----
@@ -309,7 +351,7 @@ func _show_pc_onboarding() -> void:
 	head.add_theme_color_override("font_color", Color(1.0, 0.62, 0.106))
 	vb.add_child(head)
 	var lines := Label.new()
-	lines.text = "WASD / arrows — move\nMouse — look around\nClick — interact (light candles, grab, paint)\nRight-click — teleport where the petal ring lands\nShift — sprint · Esc — pause menu"
+	lines.text = "Mouse only: look · hold Left-click = walk · Right-click = teleport · Left-click = use\nMouse — look around\nHold Left-click — walk forward (or WASD / arrows)\nLeft-click — interact (light candles, grab, paint)\nRight-click — teleport where the petal ring lands\n❚❚ button (top right) — pause menu · Shift — sprint"
 	lines.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lines.add_theme_font_size_override("font_size", 34)
 	lines.add_theme_color_override("font_color", Color(1.0, 0.965, 0.910))
@@ -504,7 +546,13 @@ func _on_experience_complete() -> void:
 		gt.chapter_end("completed")
 	# v0.7.0: SLEEPY as the candle-light fades toward the transition.
 	MarigoldCharacterRig.set_all_expressions("SLEEPY", 1.2)
+	# v0.9.3: guard the await - if the player restarted/quit inside the
+	# window, the resumed call must not quit the NEWLY loaded chapter
+	# (code-quality audit R3).
+	var finished_chapter := _current_chapter
 	await get_tree().create_timer(0.8).timeout
+	if _current_chapter != finished_chapter:
+		return
 	_quit_to_menu()
 
 
@@ -785,9 +833,9 @@ func _on_flight_done(next_idx: int) -> void:
 ## ---- Journey progress (Continue Journey, v0.5.0) ----
 
 func _load_progress() -> Dictionary:
-	var cfg := ConfigFile.new()
+	var cfg := MarigoldSettings.load_cfg(PROGRESS_FILE)
 	var res := {"current": 0, "completed": []}
-	if cfg.load(PROGRESS_FILE) != OK:
+	if not cfg.has_section("journey"):
 		return res
 	res["current"] = int(cfg.get_value("journey", "current", 0))
 	var done: Array = []
@@ -798,16 +846,14 @@ func _load_progress() -> Dictionary:
 
 
 func _save_progress(idx: int) -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(PROGRESS_FILE) # keep completed list
+	var cfg := MarigoldSettings.load_cfg(PROGRESS_FILE) # keep completed list
 	cfg.set_value("journey", "current", idx)
-	cfg.save(PROGRESS_FILE)
+	MarigoldSettings.save_cfg(cfg, PROGRESS_FILE)
 	_refresh_menu_progress()
 
 
 func _mark_completed(idx: int) -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(PROGRESS_FILE)
+	var cfg := MarigoldSettings.load_cfg(PROGRESS_FILE)
 	var done: Array = []
 	for x in cfg.get_value("journey", "completed", []):
 		done.append(int(x))
@@ -815,7 +861,7 @@ func _mark_completed(idx: int) -> void:
 		done.append(idx)
 	cfg.set_value("journey", "completed", done)
 	cfg.set_value("journey", "current", mini(idx + 1, CHAPTERS.size() - 1))
-	cfg.save(PROGRESS_FILE)
+	MarigoldSettings.save_cfg(cfg, PROGRESS_FILE)
 	_refresh_menu_progress()
 
 

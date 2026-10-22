@@ -103,6 +103,8 @@ var _current_key := ""
 var _cards := {}
 var _page_settings: Control
 var _setting_value_btns := {}
+var _legend_back_btn: Button = null
+var _restore_focus_key := ""
 var _direct: DirectUIInput = null
 # v0.8.0: mode-switch note (restart required — shown under the rows).
 var _mode_note: Label = null
@@ -116,19 +118,65 @@ var _resume_btn: Button = null # v0.9.2: default focus for pad/keyboard nav
 var _last_click_msec := 0
 var _last_click_pos := Vector2(-9999, -9999)
 
+# v0.9.3 one-handed PC (wade's order): a screen-space ❚❚ pause button,
+# always visible in the top corner during PC-mode chapters — pause must
+# be openable by mouse alone (Esc needs the keyboard hand). The 3D exit
+# quad stays for VR.
+var _pc_pause_btn: Button = null
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_exit_button()
 	_build_panel()
 	_build_direct_input()
+	_build_pc_pause_button()
 	_panel_root.visible = false
 	_exit_root.visible = false
+
+
+## Screen-space pause button (PC mode only; visibility driven in
+## _process: attached to a chapter, pause closed, PC launch mode).
+func _build_pc_pause_button() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "PCPauseButtonLayer"
+	layer.layer = 30
+	add_child(layer)
+	var b := Button.new()
+	b.name = "PCPauseButton"
+	b.text = "❚❚"
+	b.add_theme_font_size_override("font_size", 30)
+	b.add_theme_color_override("font_color", C_MARIGOLD)
+	b.add_theme_color_override("font_hover_color", Color(0.1, 0.05, 0.1))
+	b.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	b.offset_left = -118
+	b.offset_top = 14
+	b.offset_right = -14
+	b.offset_bottom = 72
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.16, 0.05, 0.14, 0.82)
+	sb.border_color = C_MARIGOLD
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(14)
+	b.add_theme_stylebox_override("normal", sb)
+	var hov := sb.duplicate() as StyleBoxFlat
+	hov.bg_color = C_MARIGOLD
+	b.add_theme_stylebox_override("hover", hov)
+	b.add_theme_stylebox_override("pressed", hov)
+	b.add_theme_stylebox_override("focus", _focus_style(sb))
+	b.pressed.connect(func() -> void: _toggle_pause("exit_button"))
+	layer.add_child(b)
+	_pc_pause_btn = b
+	_pc_pause_btn.visible = false
 
 
 func _process(delta: float) -> void:
 	if _cooldown > 0.0:
 		_cooldown -= delta
+	# v0.9.3: screen-space pause button visibility (PC chapters only).
+	if _pc_pause_btn != null:
+		_pc_pause_btn.visible = _attached and not _pause_open \
+				and MarigoldState.is_pc_mode()
 	var xr := false
 	var vp := get_viewport()
 	if vp != null:
@@ -157,6 +205,20 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# v0.9.3 (input audit U2): gamepad B while pause is OPEN goes back one
+	# page. This must run before the ui_cancel branch - the engine binds B
+	# into ui_cancel, so B on Settings/Controles used to resume the game
+	# outright (and the documented _forward_nav_event B path never ran).
+	if _pause_open and event is InputEventJoypadButton:
+		var jb0 := event as InputEventJoypadButton
+		if jb0.pressed and jb0.button_index == JOY_BUTTON_B:
+			if (_page_settings != null and _page_settings.visible) \
+					or (_legend_page != null and _legend_page.visible):
+				_back_to_main()
+			elif _attached and _cooldown <= 0.0:
+				_cooldown = 0.4
+				_toggle_pause("gamepad")
+			return
 	# Desktop: Esc toggles pause.
 	if event.is_action_pressed("ui_cancel"):
 		if _attached and _cooldown <= 0.0:
@@ -210,9 +272,9 @@ func _forward_nav_event(event: InputEvent) -> void:
 		var jb := event as InputEventJoypadButton
 		if jb.pressed and jb.button_index == JOY_BUTTON_B:
 			if _page_settings != null and _page_settings.visible:
-				_show_main_page()
+				_back_to_main()
 			elif _legend_page != null and _legend_page.visible:
-				_show_main_page()
+				_back_to_main()
 			else:
 				_resume()
 			return
@@ -242,13 +304,33 @@ func _forward_nav_event(event: InputEvent) -> void:
 					vp.push_input(event)
 
 
-## Focus Continuar when navigation starts with nothing focused.
+## The first focusable control of whichever page is showing now
+## (v0.9.3, input audit U3).
+func _page_first_focusable() -> Control:
+	if _page_settings != null and _page_settings.visible:
+		for key in _setting_value_btns.keys():
+			var d: Dictionary = _setting_value_btns[key]
+			var b := d.get("btn") as Button
+			if b != null and is_instance_valid(b):
+				return b
+		return null
+	if _legend_page != null and _legend_page.visible:
+		return _legend_back_btn
+	return _resume_btn
+
+
+## Focus the current page's first control when navigation starts with
+## nothing (validly) focused. v0.9.3: a focus owner that is NOT visible
+## in the tree (e.g. a button on the page we just left) counts as "no
+## focus" - the old null-only check stranded pad users after every page
+## switch.
 func _ensure_nav_focus(vp: SubViewport) -> void:
-	if vp.gui_get_focus_owner() != null:
+	var owner := vp.gui_get_focus_owner()
+	if owner != null and owner.is_visible_in_tree():
 		return
-	if _resume_btn != null and is_instance_valid(_resume_btn) \
-			and _resume_btn.visible:
-		_resume_btn.grab_focus()
+	var first := _page_first_focusable()
+	if first != null and is_instance_valid(first):
+		first.grab_focus()
 
 
 ## ---- public API (called by main.gd) ----
@@ -317,6 +399,21 @@ func clear_nav() -> void:
 
 ## via: "menu_hold" | "exit_button" | "esc" (QA_PLAN_V0110 §1.3:
 ## the next telemetry digest must tell accidental taps from real opens).
+## v0.9.3 (A3): UI one-shots through the shared music player.
+func _sfx(sfx_name: String) -> void:
+	var st := get_node_or_null("/root/MarigoldState")
+	if st != null and st.music != null and st.music.has_method("play_sfx"):
+		st.music.play_sfx(sfx_name, -6.0)
+
+
+## Back-navigation: show the main page WITH the back sound (the B
+## button, Esc layer and page Back buttons route here; _open() calls
+## _show_main_page directly so opening stays a single ui_select).
+func _back_to_main() -> void:
+	_sfx("ui_back")
+	_show_main_page()
+
+
 func _toggle_pause(via: String = "menu_hold") -> void:
 	if _pause_open:
 		_resume()
@@ -338,6 +435,7 @@ func _open(via: String = "menu_hold") -> void:
 	if _direct != null:
 		_direct.set_target(_panel_viewport, _panel_quad)
 	MarigoldHaptics.confirm()
+	_sfx("ui_select") # v0.9.3 (A3)
 	# v0.6.1: gameplay telemetry — pause opens feed "where do players pause".
 	# v0.7.0: "via" attributes the source (menu_hold/exit_button/esc).
 	var gt := get_node_or_null("/root/GameplayTelemetry")
@@ -365,6 +463,7 @@ func _resume() -> void:
 	if _attached:
 		_exit_root.visible = true
 	MarigoldHaptics.confirm()
+	_sfx("ui_select") # v0.9.3 (A3)
 	pause_toggled.emit(false)
 
 
@@ -663,7 +762,7 @@ func _build_panel() -> void:
 	_legend_lines.add_theme_color_override("font_color", C_CREAM)
 	_legend_lines.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_legend_page.add_child(_legend_lines)
-	_add_panel_button(_legend_page, "Atras  (Back)", C_BLUE, _show_main_page)
+	_legend_back_btn = _add_panel_button(_legend_page, "Atras  (Back)", C_BLUE, _back_to_main)
 
 	# Settings page (v0.7.0, wade's order): one tap away from the pause
 	# menu. Simple flat 2D rows matching the grid language.
@@ -702,6 +801,8 @@ func _add_card(parent: Control, key: String, card_name: String, mood: String) ->
 	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hb.alignment = BoxContainer.ALIGNMENT_CENTER
 	hb.add_theme_constant_override("separation", 14)
+	# v0.9.3 (U6): anchor the content stack to the whole card.
+	hb.set_anchors_preset(Control.PRESET_FULL_RECT)
 	b.add_child(hb)
 	var chip := ColorRect.new()
 	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -850,6 +951,16 @@ func _build_settings_page(vb: VBoxContainer) -> void:
 	_add_setting_row("gfx", "Calidad gráfica · Graphics",
 			Callable(MarigoldGfx, "quality_label"),
 			Callable(self, "_cycle_setting_gfx"))
+	# v0.9.3 (A7): real bus-volume rows (Master <- Music/SFX/Voice).
+	_add_setting_row("musicvol", "Música · Music volume",
+			Callable(MarigoldGfx, "music_vol_label"),
+			Callable(self, "_cycle_setting_musicvol"))
+	_add_setting_row("sfxvol", "Efectos · SFX volume",
+			Callable(MarigoldGfx, "sfx_vol_label"),
+			Callable(self, "_cycle_setting_sfxvol"))
+	_add_setting_row("voicevol", "Voces · Voice volume",
+			Callable(MarigoldGfx, "voice_vol_label"),
+			Callable(self, "_cycle_setting_voicevol"))
 	# v0.7.0 Comfort rows (COMFORT_V0110.md §3).
 	_add_setting_row("textsize", "Tamaño de texto · Text size",
 			Callable(self, "_textsize_label"),
@@ -898,7 +1009,7 @@ func _build_settings_page(vb: VBoxContainer) -> void:
 	note.add_theme_font_size_override("font_size", 26)
 	note.add_theme_color_override("font_color", C_CREAM.darkened(0.25))
 	_page_settings.add_child(note)
-	_add_panel_button(_page_settings, "Atras  (Back)", C_BLUE, _show_main_page)
+	_add_panel_button(_page_settings, "Atras  (Back)", C_BLUE, _back_to_main)
 
 
 ## v0.7.0 Comfort setting labels + cyclers.
@@ -1013,6 +1124,17 @@ func _cycle_setting_mode() -> void:
 func _refresh_settings_labels() -> void:
 	# Rebuild the settings page to refresh labels (simple, robust).
 	if _page_settings != null:
+		# v0.9.3 (U3): the rebuild destroys the focused button - remember
+		# its row key so _rebuild_settings_deferred can restore focus.
+		_restore_focus_key = ""
+		var vp := _active_viewport()
+		if vp != null:
+			var owner := vp.gui_get_focus_owner()
+			if owner != null:
+				for key in _setting_value_btns.keys():
+					if (_setting_value_btns[key] as Dictionary).get("btn") == owner:
+						_restore_focus_key = key
+						break
 		for c in _page_settings.get_children():
 			c.queue_free()
 		# Rebuild via deferred to avoid modifying during iteration.
@@ -1025,6 +1147,11 @@ func _rebuild_settings_deferred() -> void:
 		_page_settings.queue_free()
 		_build_settings_page(vb)
 		_show_settings_page()
+		if _restore_focus_key != "" and _setting_value_btns.has(_restore_focus_key):
+			var b := (_setting_value_btns[_restore_focus_key] as Dictionary).get("btn") as Button
+			if b != null and is_instance_valid(b):
+				b.grab_focus()
+			_restore_focus_key = ""
 
 func _add_setting_row(key: String, label_text: String, get_label: Callable,
 		cycle: Callable) -> void:
@@ -1070,6 +1197,18 @@ func _cycle_setting_hand() -> void:
 	MarigoldGfx.cycle_dominant_hand()
 
 
+func _cycle_setting_musicvol() -> void:
+	MarigoldGfx.cycle_music_volume()
+
+
+func _cycle_setting_sfxvol() -> void:
+	MarigoldGfx.cycle_sfx_volume()
+
+
+func _cycle_setting_voicevol() -> void:
+	MarigoldGfx.cycle_voice_volume()
+
+
 func _tips_label() -> String:
 	return "Sí" if MarigoldGfx.tooltips_on() else "No"
 
@@ -1113,6 +1252,9 @@ func _show_main_page() -> void:
 	_panel_stack.visible = true
 	_legend_page.visible = false
 	_page_settings.visible = false
+	# v0.9.3 (U3): page switches MOVE focus to the page being shown.
+	if _resume_btn != null and is_instance_valid(_resume_btn):
+		_resume_btn.grab_focus()
 
 
 func _show_settings_page() -> void:
@@ -1120,6 +1262,9 @@ func _show_settings_page() -> void:
 	_legend_page.visible = false
 	_page_settings.visible = true
 	_refresh_all_settings()
+	var first := _page_first_focusable()
+	if first != null and is_instance_valid(first):
+		first.grab_focus()
 
 
 func _show_legend_page() -> void:
@@ -1127,6 +1272,8 @@ func _show_legend_page() -> void:
 	_legend_page.visible = true
 	_page_settings.visible = false
 	_legend_lines.text = MarigoldControllerSkins.legend_text(_legend_key)
+	if _legend_back_btn != null and is_instance_valid(_legend_back_btn):
+		_legend_back_btn.grab_focus()
 
 
 ## STATIC PLACEMENT CONTRACT (wade's 2026-10-12 order, SHIP-BLOCKER):

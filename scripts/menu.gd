@@ -6,7 +6,8 @@ class_name MarigoldMenu
 ## (defaults to immersive), no time-of-day selector. Two passive headers —
 ## STORY CHAPTERS (ch1..ch5 in story order) then EXPERIENCES (Mano Magica,
 ## Guitarra, Pinta, Espejo, Galeria, Tu Ofrenda finale last). Each row:
-## "Name — built by Muse" + one-line description.
+## Plain chapter name + one-line description ("built by Muse" lives
+## ONLY on the launcher header - wade's branding rule).
 ##
 ## Panel framing (photo-bug fix): the old build parked the quad at a fixed
 ## tracking-space offset with NO recenter, so any play-space offset clipped
@@ -82,6 +83,8 @@ var _test_button: Button
 var _download_button: Button
 var _install_button: Button
 var _room_dialog: Control
+var _again_btn: Button = null # finale "Journey Again" (focus target, U3)
+var _room_center_btn: Button = null # room dialog primary (focus target, U3)
 var _dwell_ring: MeshInstance3D
 # v0.8.0 PC reframing: VR-only rows hidden on desktop.
 var _room_button: Button = null
@@ -89,6 +92,33 @@ var _conn_row: HBoxContainer = null
 var _hint_label: Label = null
 var _vr_hint_label: Label = null
 var _pc_framed := false
+
+# v0.9.3 PC 2D menu (wade's order, photo evidence): in PC mode the
+# launcher is a true full-screen 2D Control UI in the ROOT viewport
+# (CanvasLayer below) — clickable chapter list, fixed description side
+# panel, Settings / Diagnostics pages with on-screen Back buttons.
+# The 3D panel is built but NEVER shown in PC mode. VR is untouched.
+var _pc_mode := false
+var _pc_layer: CanvasLayer = null
+var _pc_pages := {} # "main" | "settings" | "diag" | "finale" -> Control
+var _pc_page_focus := {} # page name -> Control to focus on open
+var _pc_list_vbox: VBoxContainer = null
+var _pc_scroll: ScrollContainer = null
+var _pc_first_row: Button = null
+var _pc_desc_art: TextureRect = null
+var _pc_desc_name: Label = null
+var _pc_desc_text: Label = null
+var _pc_status_label: Label = null
+var _pc_version_label: Label = null
+var _pc_download_button: Button = null
+var _pc_install_button: Button = null
+var _pc_diag_label: Label = null
+var _pc_conn_label: Label = null
+var _pc_test_button: Button = null
+var _pc_mode_note: Label = null
+var _pc_setting_btns := {} # setting key -> value Button
+var _pc_setting_gets := {} # setting key -> Callable label getter
+var _pc_built := false
 
 var _chapter_names: Array = []
 var _experiences: Array = []
@@ -124,7 +154,12 @@ var _first_row: Button = null # focus target for gamepad/keyboard nav
 
 func _ready() -> void:
 	_boot_msec = Time.get_ticks_msec()
+	# Launch mode is set by main.gd BEFORE the menu is built (source of
+	# truth: MarigoldState), so the PC/VR branch is safe to take here.
+	_pc_mode = MarigoldState.is_pc_mode()
 	_build_panel_stage0()
+	if _pc_mode:
+		_panel_root.visible = false # PC never shows the 3D panel
 	RenderingServer.frame_post_draw.connect(_on_first_frame, CONNECT_ONE_SHOT)
 	call_deferred("_stage1")
 
@@ -136,6 +171,15 @@ func _on_first_frame() -> void:
 
 
 func _process(delta: float) -> void:
+	if _pc_mode:
+		# PC 2D menu: only the scroll-button hold-repeat runs here; the
+		# UI itself is native root-viewport GUI (mouse/wheel/focus).
+		if _scroll_dir != 0 and _pc_scroll != null:
+			_scroll_acc += delta
+			while _scroll_acc >= SCROLL_REPEAT:
+				_scroll_acc -= SCROLL_REPEAT
+				_pc_scroll.scroll_vertical += _scroll_dir * SCROLL_STEP * 3.0
+		return
 	var xr := get_viewport().use_xr
 	# v0.7.0 Settings: input-method preference is real — the
 	# non-preferred path's beams stay hidden.
@@ -183,6 +227,9 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _pc_mode:
+		_pc_input(event)
+		return
 	if _panel_root == null or not _panel_root.visible:
 		return
 	# v0.9.2: gamepad + keyboard navigation goes into the panel viewport
@@ -255,8 +302,14 @@ func _forward_nav_event(event: InputEvent) -> void:
 
 ## First nav event with nothing focused: focus the first list row (or the
 ## updates button when the list is empty) so D-pad/stick has a start.
+## v0.9.3 (input audit U3): a focus owner that is not visible in the tree
+## (e.g. a row of the hidden list while the finale/dialog shows) counts
+## as "no focus" - visibility switches never move focus on their own.
 func _ensure_nav_focus() -> void:
-	if _viewport == null or _viewport.gui_get_focus_owner() != null:
+	if _viewport == null:
+		return
+	var owner := _viewport.gui_get_focus_owner()
+	if owner != null and owner.is_visible_in_tree():
 		return
 	var target: Control = _first_row
 	if target == null or not is_instance_valid(target) or not target.visible:
@@ -269,6 +322,75 @@ func _ensure_nav_focus() -> void:
 func _note_input(source: String) -> void:
 	_last_input_text = source
 	_last_input_msec = Time.get_ticks_msec()
+
+
+## ---- PC 2D menu input (root-viewport GUI does the heavy lifting) ----
+
+## Mouse clicks, the mouse wheel, arrow keys and D-pad/stick navigation
+## reach the PC menu's controls NATIVELY (they live in the root viewport,
+## unlike the VR panel's SubViewport). Only two things need a hand:
+## gamepad A (the engine's ui_accept has no joypad binding — same fix
+## as the boot chooser) and gamepad B (back out of sub-pages). Keyboard
+## Enter/Space already fire ui_accept natively.
+func _pc_input(event: InputEvent) -> void:
+	if _pc_layer == null or not _pc_layer.visible:
+		return
+	if event is InputEventJoypadButton:
+		var jb := event as InputEventJoypadButton
+		if not jb.pressed:
+			return
+		_note_input("Gamepad")
+		if jb.button_index == JOY_BUTTON_A:
+			_pc_ensure_focus()
+			var acc := InputEventAction.new()
+			acc.action = &"ui_accept"
+			acc.pressed = true
+			get_viewport().push_input(acc)
+			var rel := InputEventAction.new()
+			rel.action = &"ui_accept"
+			rel.pressed = false
+			get_viewport().push_input(rel)
+		elif jb.button_index == JOY_BUTTON_B:
+			if _pc_current_page() != "main":
+				_pc_show_page("main")
+	elif event is InputEventJoypadMotion:
+		var jm := event as InputEventJoypadMotion
+		if jm.axis == JOY_AXIS_LEFT_X or jm.axis == JOY_AXIS_LEFT_Y:
+			_note_input("Gamepad")
+			_pc_ensure_focus()
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			_note_input("Mouse click")
+	elif event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			match k.keycode:
+				KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_TAB:
+					_note_input("Keyboard")
+					_pc_ensure_focus()
+
+
+## Name of the PC page currently shown ("" when the layer is hidden).
+func _pc_current_page() -> String:
+	for key in _pc_pages.keys():
+		if (_pc_pages[key] as Control).visible:
+			return String(key)
+	return ""
+
+
+## First pad/stick/key event with nothing (validly) focused: focus the
+## current page's primary control so navigation has a start point.
+func _pc_ensure_focus() -> void:
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner != null and owner.is_visible_in_tree():
+		return
+	var page := _pc_current_page()
+	var target: Control = _pc_page_focus.get(page, null)
+	if target == null and page == "main":
+		target = _pc_first_row
+	if target != null and is_instance_valid(target):
+		target.grab_focus()
 
 
 ## ---- public API (called by main.gd) ----
@@ -291,6 +413,12 @@ func set_progress(idx: int, completed: Array) -> void:
 
 
 func show_menu() -> void:
+	if _pc_mode:
+		if _pc_layer == null:
+			return # stage 1 has not built the 2D menu yet
+		_pc_layer.visible = true
+		_pc_show_page("main")
+		return
 	_panel_root.visible = true
 	if _menu_panel == null:
 		return # stage 0: still showing the LOADING placeholder
@@ -302,6 +430,10 @@ func show_menu() -> void:
 
 
 func hide_menu() -> void:
+	if _pc_mode:
+		if _pc_layer != null:
+			_pc_layer.visible = false
+		return
 	_panel_root.visible = false
 	if _menu_panel == null:
 		return
@@ -311,6 +443,12 @@ func hide_menu() -> void:
 
 
 func show_finale() -> void:
+	if _pc_mode:
+		if _pc_layer == null:
+			return
+		_pc_layer.visible = true
+		_pc_show_page("finale")
+		return
 	_panel_root.visible = true
 	if _menu_panel == null:
 		return
@@ -318,33 +456,60 @@ func show_finale() -> void:
 	_finale_center.visible = true
 	_recenter_panel()
 	_resettle_t = RESETTLE_DELAY
+	# v0.9.3 (U3): move focus onto the finale's button - it used to stay
+	# on a hidden list row, stranding pad/keyboard users.
+	if _again_btn != null and is_instance_valid(_again_btn):
+		_again_btn.grab_focus()
 
 
 func set_status(text: String) -> void:
 	if _status_label != null:
 		_status_label.text = text
+	if _pc_status_label != null:
+		_pc_status_label.text = text
 
 
 func set_version(text: String) -> void:
 	_pending_version = text
 	if _version_label != null:
 		_version_label.text = text
+	if _pc_version_label != null:
+		_pc_version_label.text = text
 
 
 func offer_download(version: String) -> void:
-	_download_button.text = "Download v" + version
-	_download_button.visible = true
-	_install_button.visible = false
+	if _download_button != null:
+		_download_button.text = "Download v" + version
+		_download_button.visible = true
+	if _install_button != null:
+		_install_button.visible = false
+	if _pc_download_button != null:
+		_pc_download_button.text = "Download v" + version
+		_pc_download_button.visible = true
+	if _pc_install_button != null:
+		_pc_install_button.visible = false
 
 
 func offer_install() -> void:
-	_download_button.visible = false
-	_install_button.visible = true
+	if _download_button != null:
+		_download_button.visible = false
+	if _install_button != null:
+		_install_button.visible = true
+	if _pc_download_button != null:
+		_pc_download_button.visible = false
+	if _pc_install_button != null:
+		_pc_install_button.visible = true
 
 
 func clear_update_buttons() -> void:
-	_download_button.visible = false
-	_install_button.visible = false
+	if _download_button != null:
+		_download_button.visible = false
+	if _install_button != null:
+		_install_button.visible = false
+	if _pc_download_button != null:
+		_pc_download_button.visible = false
+	if _pc_install_button != null:
+		_pc_install_button.visible = false
 
 
 ## ---- stage 0: panel + quad + LOADING label (frame 1) ----
@@ -424,12 +589,17 @@ func _build_panel_stage0() -> void:
 
 func _stage1() -> void:
 	_stage1_msec = Time.get_ticks_msec()
-	_build_ui()
-	_build_pointers()
-	_build_direct_input()
-	_recenter_panel()
-	_resettle_t = RESETTLE_DELAY
-	call_deferred("_stage2")
+	if _pc_mode:
+		# PC: build the full-screen 2D menu. No 3D pointers, no altar
+		# decor, no panel to recenter — the panel stays hidden.
+		_build_pc_ui()
+	else:
+		_build_ui()
+		_build_pointers()
+		_build_direct_input()
+		_recenter_panel()
+		_resettle_t = RESETTLE_DELAY
+		call_deferred("_stage2")
 	# v0.7.0 full-featured bar: the menu was completely silent. Start a
 	# warm tender loop so the launcher has music from first frame.
 	if MarigoldState.music != null:
@@ -703,7 +873,7 @@ func _build_ui() -> void:
 	_vr_hint_label = _add_label(_menu_panel, "Point the laser and pull the trigger (or pinch) to select",
 			24, C_DIM)
 	_hint_label = _add_label(_menu_panel,
-			"Click to select · WASD move · Mouse look · Right-click teleport · Esc pause",
+			"Mouse only: look · hold Left-click = walk · Right-click = teleport · Left-click = use",
 			24, C_DIM)
 	_hint_label.visible = false # v0.8.0: PC hint, shown by _apply_pc_framing
 
@@ -745,7 +915,721 @@ func _apply_pc_framing() -> void:
 		_hint_label.visible = true
 
 
+## ---- PC 2D menu (v0.9.3, wade's order) ----
+##
+## A normal full-screen 2D menu for PC mode: papel-picado banner strip,
+## title header, clickable chapter list (left) + fixed description
+## panel (right, key art + wrapped text, never overlapping the list),
+## and Settings / Check for Updates / Diagnostics / Quit in the footer.
+## Settings and Diagnostics are pages of this same layer, each with an
+## on-screen Back button — every action is reachable by mouse alone,
+## and the list scrolls with the wheel, the on-screen ▲/▼ buttons, and
+## focus-follow for keyboard/gamepad.
+
+func _pc_label(text: String, size: int, color: Color,
+		align: HorizontalAlignment = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = align
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## One PC page: opaque backdrop + margins + a VBox to fill.
+## Returns [page, vbox].
+func _pc_make_page() -> Array:
+	var page := Control.new()
+	page.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.visible = false
+	var bg := ColorRect.new()
+	bg.color = C_BG
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.add_child(bg)
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 44)
+	margin.add_theme_constant_override("margin_right", 44)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	page.add_child(margin)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	margin.add_child(vb)
+	return [page, vb]
+
+
+func _pc_show_page(page_name: String) -> void:
+	for key in _pc_pages.keys():
+		(_pc_pages[key] as Control).visible = String(key) == page_name
+	if page_name == "settings":
+		_pc_refresh_settings()
+	elif page_name == "diag":
+		_refresh_diag()
+	var target: Control = _pc_page_focus.get(page_name, null)
+	if target != null and is_instance_valid(target):
+		target.grab_focus()
+
+
+func _build_pc_ui() -> void:
+	_pc_layer = CanvasLayer.new()
+	_pc_layer.name = "PCMenuLayer"
+	_pc_layer.layer = 15 # below the boot chooser (20) + onboarding (21)
+	add_child(_pc_layer)
+
+	_build_pc_main_page()
+	_build_pc_settings_page()
+	_build_pc_diag_page()
+	_build_pc_finale_page()
+
+	_ping_http = HTTPRequest.new()
+	_ping_http.name = "DiagPingHTTP"
+	_ping_http.timeout = 8
+	add_child(_ping_http)
+	_ping_http.request_completed.connect(_on_ping_completed)
+
+	_pc_built = true
+	_pc_rebuild_list()
+	_refresh_diag()
+	_pc_show_page("main")
+
+
+func _build_pc_main_page() -> void:
+	var parts := _pc_make_page()
+	var page := parts[0] as Control
+	var vb := parts[1] as VBoxContainer
+	_pc_layer.add_child(page)
+	_pc_pages["main"] = page
+
+	# Papel-picado banner strip (the game's own cut-paper textures).
+	var strip := HBoxContainer.new()
+	strip.add_theme_constant_override("separation", 8)
+	vb.add_child(strip)
+	for i in 6:
+		var tr := TextureRect.new()
+		tr.texture = MarigoldPapelPicado.banner_texture_2d(7100 + i, 256, 96)
+		tr.custom_minimum_size = Vector2(0, 36)
+		tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		strip.add_child(tr)
+
+	# Header: title + version badge. (Branding rule: the PC menu header
+	# is the plain game title; "built by Muse" lives on the boot
+	# chooser / VR launcher header only.)
+	# NOTE: the layout canvas is 1280x720 logical (stretch-expand), so
+	# every minimum below is budgeted against 720 px of height — the
+	# first screenshot pass overflowed the footer off-screen.
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 24)
+	vb.add_child(header)
+	header.add_child(_pc_label("MARIGOLD", 46, C_ACCENT))
+	var hspacer := Control.new()
+	hspacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(hspacer)
+	_pc_version_label = _pc_label(_pending_version, 30, C_DIM)
+	header.add_child(_pc_version_label)
+	vb.add_child(_pc_label("A Dia de Muertos Journey", 24, C_CREAM))
+
+	# Middle: chapter list (left) + fixed description panel (right).
+	var mid := HBoxContainer.new()
+	mid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mid.add_theme_constant_override("separation", 16)
+	vb.add_child(mid)
+
+	var list_frame := PanelContainer.new()
+	list_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var lf_style := StyleBoxFlat.new()
+	lf_style.bg_color = C_PANEL
+	lf_style.border_color = C_ACCENT
+	lf_style.set_border_width_all(3)
+	lf_style.set_corner_radius_all(18)
+	lf_style.content_margin_left = 16
+	lf_style.content_margin_right = 16
+	lf_style.content_margin_top = 16
+	lf_style.content_margin_bottom = 16
+	list_frame.add_theme_stylebox_override("panel", lf_style)
+	mid.add_child(list_frame)
+	var list_hbox := HBoxContainer.new()
+	list_hbox.add_theme_constant_override("separation", 12)
+	list_frame.add_child(list_hbox)
+	_pc_scroll = ScrollContainer.new()
+	_pc_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pc_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_pc_scroll.follow_focus = true # pad/keyboard nav auto-scrolls
+	list_hbox.add_child(_pc_scroll)
+	_pc_list_vbox = VBoxContainer.new()
+	_pc_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pc_list_vbox.add_theme_constant_override("separation", 8)
+	_pc_scroll.add_child(_pc_list_vbox)
+	var scroll_col := VBoxContainer.new()
+	scroll_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	scroll_col.add_theme_constant_override("separation", 16)
+	list_hbox.add_child(scroll_col)
+	scroll_col.add_child(_pc_make_scroll_button("▲", 1))
+	var sspacer := Control.new()
+	sspacer.custom_minimum_size = Vector2(0, 40)
+	sspacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll_col.add_child(sspacer)
+	scroll_col.add_child(_pc_make_scroll_button("▼", -1))
+
+	# Fixed description area: key art + name + wrapping description.
+	# A sibling of the list inside containers — it can never overlap it.
+	var desc_frame := PanelContainer.new()
+	desc_frame.custom_minimum_size = Vector2(400, 0)
+	desc_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var df_style := StyleBoxFlat.new()
+	df_style.bg_color = C_PANEL
+	df_style.border_color = C_TERRA
+	df_style.set_border_width_all(3)
+	df_style.set_corner_radius_all(18)
+	df_style.content_margin_left = 14
+	df_style.content_margin_right = 14
+	df_style.content_margin_top = 10
+	df_style.content_margin_bottom = 10
+	desc_frame.add_theme_stylebox_override("panel", df_style)
+	mid.add_child(desc_frame)
+	var dvb := VBoxContainer.new()
+	dvb.add_theme_constant_override("separation", 6)
+	desc_frame.add_child(dvb)
+	_pc_desc_art = TextureRect.new()
+	_pc_desc_art.custom_minimum_size = Vector2(372, 120)
+	_pc_desc_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_pc_desc_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_pc_desc_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dvb.add_child(_pc_desc_art)
+	# Autowrap labels MUST carry an explicit wrap width: without one a
+	# Label reports its minimum height wrapped at its narrowest word,
+	# which inflates the whole panel and starves the list (found in
+	# the v0.9.3 screenshot pass — footer pushed off-screen).
+	# Line caps keep the panel's minimum height bounded for EVERY
+	# chapter (a long name/description must never re-inflate the page
+	# and push the footer out — hover states change these texts).
+	_pc_desc_name = _pc_label("", 34, C_CREAM)
+	_pc_desc_name.max_lines_visible = 1
+	_pc_desc_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pc_desc_name.custom_minimum_size = Vector2(372, 0)
+	dvb.add_child(_pc_desc_name)
+	_pc_desc_text = _pc_label("", 24, C_DIM)
+	_pc_desc_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pc_desc_text.max_lines_visible = 3
+	_pc_desc_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pc_desc_text.custom_minimum_size = Vector2(372, 0)
+	_pc_desc_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dvb.add_child(_pc_desc_text)
+	var desc_hint := _pc_label("Hover to preview — click to play.", 20, C_DIM)
+	desc_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_hint.custom_minimum_size = Vector2(372, 0)
+	dvb.add_child(desc_hint)
+
+	# Footer: every launcher action, mouse-reachable.
+	var footer := HBoxContainer.new()
+	footer.add_theme_constant_override("separation", 16)
+	vb.add_child(footer)
+	var settings_btn := _make_button("Settings", 32, C_ACCENT)
+	settings_btn.pressed.connect(func() -> void: _pc_show_page("settings"))
+	footer.add_child(settings_btn)
+	var upd := _make_button("Check for Updates", 32, C_ACCENT)
+	upd.pressed.connect(func() -> void: updates_requested.emit())
+	footer.add_child(upd)
+	var diag_btn := _make_button("Diagnostics", 32, C_ACCENT)
+	diag_btn.pressed.connect(func() -> void: _pc_show_page("diag"))
+	footer.add_child(diag_btn)
+	_pc_download_button = _make_button("Download", 32, C_ACCENT)
+	_pc_download_button.visible = false
+	_pc_download_button.pressed.connect(func() -> void: download_requested.emit())
+	footer.add_child(_pc_download_button)
+	_pc_install_button = _make_button("Install Update", 32, C_ACCENT)
+	_pc_install_button.visible = false
+	_pc_install_button.pressed.connect(func() -> void: install_requested.emit())
+	footer.add_child(_pc_install_button)
+	var quit_btn := _make_button("Quit", 32, C_TERRA)
+	quit_btn.pressed.connect(func() -> void: get_tree().quit())
+	footer.add_child(quit_btn)
+	# Footer buttons ride slimmer than the standard 88px so the page
+	# fits the 720px logical canvas (see header note).
+	for fb in [settings_btn, upd, diag_btn, _pc_download_button,
+			_pc_install_button, quit_btn]:
+		(fb as Button).custom_minimum_size.y = 64
+
+	_pc_status_label = _pc_label("", 24, C_DIM)
+	_pc_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pc_status_label.max_lines_visible = 2
+	_pc_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_pc_status_label.custom_minimum_size = Vector2(900, 0)
+	vb.add_child(_pc_status_label)
+	vb.add_child(_pc_label(
+			"Mouse only: look · hold Left-click = walk · Right-click = teleport · Left-click = use",
+			20, C_DIM))
+
+
+func _pc_make_scroll_button(text: String, dir: int) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(104, 104)
+	b.add_theme_font_size_override("font_size", 48)
+	b.add_theme_color_override("font_color", C_ACCENT)
+	b.add_theme_color_override("font_hover_color", C_DARK)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = C_PANEL
+	normal.border_color = C_ACCENT
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(20)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = C_ACCENT
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
+	b.pressed.connect(func() -> void:
+		if _pc_scroll != null:
+			_pc_scroll.scroll_vertical += -dir * int(SCROLL_STEP))
+	b.button_down.connect(func() -> void:
+		_scroll_dir = -dir
+		_scroll_acc = SCROLL_REPEAT * 0.5)
+	b.button_up.connect(func() -> void:
+		if _scroll_dir == -dir:
+			_scroll_dir = 0
+			_scroll_acc = 0.0)
+	return b
+
+
+func _pc_rebuild_list() -> void:
+	if not _pc_built or _pc_list_vbox == null:
+		return
+	_pc_first_row = null
+	for c in _pc_list_vbox.get_children():
+		c.queue_free()
+	_add_pc_section_header("STORY CHAPTERS")
+	for i in range(_chapter_names.size()):
+		var info: Dictionary = _chapter_names[i]
+		var name := String(info.get("name", "Chapter"))
+		var mark := ""
+		if _completed.has(i):
+			mark = "✓ "
+		elif i == _progress_idx:
+			mark = "▶ "
+		var row := _make_pc_row("%d. %s%s" % [i + 1, mark, name],
+				String(info.get("desc", "")))
+		if _pc_first_row == null:
+			_pc_first_row = row
+		var idx := i
+		row.pressed.connect(func() -> void:
+			if MarigoldState.music != null:
+				MarigoldState.music.chime(72)
+			MarigoldHaptics.click()
+			chapter_chosen.emit(idx))
+		row.mouse_entered.connect(func() -> void: _pc_describe_chapter(idx))
+		row.focus_entered.connect(func() -> void: _pc_describe_chapter(idx))
+		_pc_list_vbox.add_child(row)
+	_add_pc_section_header("EXPERIENCES")
+	for key in EXP_ORDER:
+		var info := _find_experience(key)
+		if info.is_empty():
+			continue
+		var k := String(info.get("key", key))
+		var gated := k == "espejo" # PC mode: Espejo needs a headset
+		var row_name := String(info.get("name", "Experience"))
+		var row_desc := String(info.get("desc", ""))
+		if gated:
+			row_name = "Espejo — needs a headset"
+			row_desc = "Body-tracked mirror dance. Switch to VR mode in Settings."
+		var row := _make_pc_row(row_name, row_desc)
+		if gated:
+			row.modulate = Color(1, 1, 1, 0.45)
+			row.pressed.connect(func() -> void:
+				set_status("Espejo needs a headset — open Settings " \
+						+ "and switch Mode to VR, then restart."))
+		else:
+			row.pressed.connect(func() -> void:
+				if MarigoldState.music != null:
+					MarigoldState.music.chime(72)
+				MarigoldHaptics.click()
+				experience_chosen.emit(k))
+		row.mouse_entered.connect(func() -> void: _pc_describe_exp(k))
+		row.focus_entered.connect(func() -> void: _pc_describe_exp(k))
+		_pc_list_vbox.add_child(row)
+	_pc_page_focus["main"] = _pc_first_row
+	if _chapter_names.size() > 0:
+		_pc_describe_chapter(clampi(_progress_idx, 0, _chapter_names.size() - 1))
+
+
+func _add_pc_section_header(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 30)
+	l.add_theme_color_override("font_color", C_ACCENT)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pc_list_vbox.add_child(l)
+
+
+func _make_pc_row(name: String, desc: String) -> Button:
+	var b := Button.new()
+	b.text = ""
+	b.custom_minimum_size = Vector2(0, 100)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = C_PANEL
+	normal.border_color = C_ACCENT
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(14)
+	normal.content_margin_left = 20
+	normal.content_margin_right = 20
+	normal.content_margin_top = 10
+	normal.content_margin_bottom = 10
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = C_ACCENT
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = C_TERRA
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
+	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 2)
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	b.add_child(vb)
+	var nl := Label.new()
+	nl.text = name
+	nl.add_theme_font_size_override("font_size", 36)
+	nl.add_theme_color_override("font_color", C_CREAM)
+	nl.add_theme_color_override("font_hover_color", C_DARK)
+	nl.add_theme_color_override("font_pressed_color", C_DARK)
+	nl.clip_text = true
+	nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(nl)
+	var dl := Label.new()
+	dl.text = desc
+	dl.add_theme_font_size_override("font_size", 24)
+	dl.add_theme_color_override("font_color", C_DIM)
+	dl.add_theme_color_override("font_hover_color", C_DARK)
+	dl.add_theme_color_override("font_pressed_color", C_DARK)
+	dl.clip_text = true
+	dl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(dl)
+	return b
+
+
+## Fill the fixed description panel for a story chapter.
+func _pc_describe_chapter(idx: int) -> void:
+	if idx < 0 or idx >= _chapter_names.size():
+		return
+	var info: Dictionary = _chapter_names[idx]
+	_pc_desc_name.text = String(info.get("name", "Chapter"))
+	_pc_desc_text.text = String(info.get("desc", ""))
+	var art := String(info.get("keyart", ""))
+	_pc_desc_art.texture = load(art) as Texture2D if art != "" else null
+
+
+## Fill the fixed description panel for an experience.
+func _pc_describe_exp(key: String) -> void:
+	var info := _find_experience(key)
+	if info.is_empty():
+		return
+	if key == "espejo":
+		_pc_desc_name.text = "Espejo — needs a headset"
+		_pc_desc_text.text = "Body-tracked mirror dance. Switch to VR mode in Settings, then restart."
+	else:
+		_pc_desc_name.text = String(info.get("name", "Experience"))
+		_pc_desc_text.text = String(info.get("desc", ""))
+	var art := String(info.get("keyart", ""))
+	_pc_desc_art.texture = load(art) as Texture2D if art != "" else null
+
+
+## ---- PC settings page (same real MarigoldGfx knobs as pause) ----
+
+func _build_pc_settings_page() -> void:
+	var parts := _pc_make_page()
+	var page := parts[0] as Control
+	var vb := parts[1] as VBoxContainer
+	_pc_layer.add_child(page)
+	_pc_pages["settings"] = page
+	vb.add_child(_pc_label("Settings", 52, C_ACCENT))
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	vb.add_child(scroll)
+	var rows := VBoxContainer.new()
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows.add_theme_constant_override("separation", 10)
+	scroll.add_child(rows)
+	_pc_add_setting(rows, "input", "Input method",
+			Callable(MarigoldGfx, "input_pref_label"),
+			Callable(MarigoldGfx, "cycle_input_pref"))
+	_pc_add_setting(rows, "hand", "Dominant hand",
+			Callable(MarigoldGfx, "hand_label"),
+			Callable(MarigoldGfx, "cycle_dominant_hand"))
+	_pc_add_setting(rows, "tips", "Tool tips",
+			Callable(self, "_pc_tips_label"), Callable(self, "_pc_cycle_tips"))
+	_pc_add_setting(rows, "gfx", "Graphics quality",
+			Callable(MarigoldGfx, "quality_label"),
+			Callable(MarigoldGfx, "cycle_quality"))
+	_pc_add_setting(rows, "musicvol", "Music volume",
+			Callable(MarigoldGfx, "music_vol_label"),
+			Callable(MarigoldGfx, "cycle_music_volume"))
+	_pc_add_setting(rows, "sfxvol", "SFX volume",
+			Callable(MarigoldGfx, "sfx_vol_label"),
+			Callable(MarigoldGfx, "cycle_sfx_volume"))
+	_pc_add_setting(rows, "voicevol", "Voice volume",
+			Callable(MarigoldGfx, "voice_vol_label"),
+			Callable(MarigoldGfx, "cycle_voice_volume"))
+	_pc_add_setting(rows, "textsize", "Text size",
+			Callable(self, "_pc_textsize_label"),
+			Callable(self, "_pc_cycle_textsize"))
+	_pc_add_setting(rows, "seated", "Seated mode",
+			Callable(self, "_pc_seated_label"), Callable(self, "_pc_cycle_seated"))
+	_pc_add_setting(rows, "vignette", "Vignette",
+			Callable(self, "_pc_vignette_label"),
+			Callable(self, "_pc_cycle_vignette"))
+	_pc_add_setting(rows, "flight", "Flight transitions",
+			Callable(self, "_pc_flight_label"), Callable(self, "_pc_cycle_flight"))
+	_pc_add_setting(rows, "subtitles", "Subtitles",
+			Callable(self, "_pc_subtitles_label"),
+			Callable(self, "_pc_cycle_subtitles"))
+	_pc_add_setting(rows, "dance", "One-hand dance assist",
+			Callable(self, "_pc_dance_label"), Callable(self, "_pc_cycle_dance"))
+	_pc_add_setting(rows, "sens", "Mouse sensitivity",
+			Callable(self, "_pc_sens_label"), Callable(self, "_pc_cycle_sens"))
+	_pc_add_setting(rows, "inverty", "Invert mouse Y",
+			Callable(self, "_pc_inverty_label"),
+			Callable(self, "_pc_cycle_inverty"))
+	_pc_add_setting(rows, "fullscreen", "Fullscreen",
+			Callable(self, "_pc_fullscreen_label"),
+			Callable(self, "_pc_cycle_fullscreen"))
+	_pc_add_setting(rows, "resolution", "Resolution",
+			Callable(self, "_pc_resolution_label"),
+			Callable(self, "_pc_cycle_resolution"))
+	_pc_add_setting(rows, "mode", "Mode (PC / VR)",
+			Callable(self, "_pc_mode_label"), Callable(self, "_pc_cycle_mode"))
+	_pc_mode_note = _pc_label("", 25, C_ACCENT)
+	vb.add_child(_pc_mode_note)
+	vb.add_child(_pc_label("Changes apply instantly (Mode switches on restart).",
+			24, C_DIM))
+	var back := _make_button("Back", 32, C_ACCENT)
+	back.pressed.connect(func() -> void: _pc_show_page("main"))
+	vb.add_child(back)
+	# Land keyboard/pad users on the first row, not the exit.
+	_pc_page_focus["settings"] = _pc_setting_btns.get("input", back)
+
+
+func _pc_add_setting(parent: Control, key: String, label_text: String,
+		get_label: Callable, cycle: Callable) -> void:
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 12)
+	parent.add_child(hb)
+	var lab := _pc_label(label_text, 30, C_CREAM)
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hb.add_child(lab)
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(280, 68)
+	b.add_theme_font_size_override("font_size", 30)
+	b.add_theme_color_override("font_color", C_CREAM)
+	b.add_theme_color_override("font_hover_color", C_DARK)
+	b.add_theme_color_override("font_pressed_color", C_DARK)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = C_PANEL
+	normal.border_color = C_DIM
+	normal.set_border_width_all(3)
+	normal.set_corner_radius_all(14)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = C_ACCENT
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = C_TERRA
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("focus", _focus_style(normal))
+	b.text = str(get_label.call())
+	b.pressed.connect(func() -> void:
+		cycle.call()
+		b.text = str(get_label.call()))
+	hb.add_child(b)
+	_pc_setting_btns[key] = b
+	_pc_setting_gets[key] = get_label
+
+
+func _pc_refresh_settings() -> void:
+	for key in _pc_setting_btns.keys():
+		var b := _pc_setting_btns[key] as Button
+		if b != null and is_instance_valid(b):
+			b.text = str((_pc_setting_gets[key] as Callable).call())
+
+
+func _pc_onoff(on: bool) -> String:
+	return "On" if on else "Off"
+
+
+func _pc_tips_label() -> String:
+	return _pc_onoff(MarigoldGfx.tooltips_on())
+
+func _pc_cycle_tips() -> void:
+	MarigoldGfx.set_tooltips(not MarigoldGfx.tooltips_on())
+
+func _pc_textsize_label() -> String:
+	return "Large" if MarigoldGfx.text_scale() > 1.0 else "Normal"
+
+func _pc_cycle_textsize() -> void:
+	MarigoldGfx.cycle_text_size()
+
+func _pc_seated_label() -> String:
+	return _pc_onoff(MarigoldGfx.seated_mode())
+
+func _pc_cycle_seated() -> void:
+	MarigoldGfx.set_seated_mode(not MarigoldGfx.seated_mode())
+
+func _pc_vignette_label() -> String:
+	match MarigoldGfx.vignette():
+		"soft":
+			return "Soft"
+		"strong":
+			return "Strong"
+	return "Off"
+
+func _pc_cycle_vignette() -> void:
+	MarigoldGfx.cycle_vignette()
+
+func _pc_flight_label() -> String:
+	match MarigoldGfx.flight_mode():
+		"short":
+			return "Short"
+		"skip":
+			return "Skip"
+	return "Full"
+
+func _pc_cycle_flight() -> void:
+	MarigoldGfx.cycle_flight_mode()
+
+func _pc_subtitles_label() -> String:
+	return _pc_onoff(MarigoldGfx.subtitles_on())
+
+func _pc_cycle_subtitles() -> void:
+	MarigoldGfx.set_subtitles(not MarigoldGfx.subtitles_on())
+
+func _pc_dance_label() -> String:
+	return _pc_onoff(MarigoldGfx.dance_assist())
+
+func _pc_cycle_dance() -> void:
+	MarigoldGfx.set_dance_assist(not MarigoldGfx.dance_assist())
+
+func _pc_sens_label() -> String:
+	return "%.2f" % MarigoldGfx.mouse_sensitivity()
+
+func _pc_cycle_sens() -> void:
+	MarigoldGfx.cycle_mouse_sensitivity()
+
+func _pc_inverty_label() -> String:
+	return _pc_onoff(MarigoldGfx.mouse_invert_y())
+
+func _pc_cycle_inverty() -> void:
+	MarigoldGfx.set_mouse_invert_y(not MarigoldGfx.mouse_invert_y())
+
+func _pc_fullscreen_label() -> String:
+	return _pc_onoff(MarigoldGfx.fullscreen())
+
+func _pc_cycle_fullscreen() -> void:
+	MarigoldGfx.set_fullscreen(not MarigoldGfx.fullscreen())
+
+func _pc_resolution_label() -> String:
+	return MarigoldGfx.resolution()
+
+func _pc_cycle_resolution() -> void:
+	MarigoldGfx.cycle_resolution()
+
+func _pc_mode_label() -> String:
+	var saved := MarigoldGfx.saved_launch_mode()
+	var cur := "pc" if MarigoldState.is_pc_mode() else "vr"
+	if saved != "" and saved != cur:
+		return "%s → %s (restart)" % [cur.to_upper(), saved.to_upper()]
+	return cur.to_upper()
+
+func _pc_cycle_mode() -> void:
+	var to := "vr" if MarigoldState.is_pc_mode() else "pc"
+	MarigoldGfx.save_launch_mode(to)
+	if _pc_mode_note != null:
+		_pc_mode_note.text = "Mode set to %s — restart the app to switch." \
+				% to.to_upper()
+
+
+## ---- PC diagnostics page ----
+
+func _build_pc_diag_page() -> void:
+	var parts := _pc_make_page()
+	var page := parts[0] as Control
+	var vb := parts[1] as VBoxContainer
+	_pc_layer.add_child(page)
+	_pc_pages["diag"] = page
+	vb.add_child(_pc_label("Diagnostics", 52, C_ACCENT))
+	_pc_diag_label = _pc_label("", 27, C_DIM)
+	_pc_diag_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pc_diag_label.custom_minimum_size = Vector2(1000, 0)
+	_pc_diag_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(_pc_diag_label)
+	var conn_row := HBoxContainer.new()
+	conn_row.add_theme_constant_override("separation", 16)
+	vb.add_child(conn_row)
+	_pc_test_button = _make_button("Test connection", 30, C_ACCENT)
+	_pc_test_button.custom_minimum_size = Vector2(340, 84)
+	_pc_test_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_pc_test_button.pressed.connect(_test_connection)
+	conn_row.add_child(_pc_test_button)
+	_pc_conn_label = _pc_label("Connection: not tested", 28, C_DIM)
+	_pc_conn_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	conn_row.add_child(_pc_conn_label)
+	var back := _make_button("Back", 32, C_ACCENT)
+	back.pressed.connect(func() -> void: _pc_show_page("main"))
+	vb.add_child(back)
+	_pc_page_focus["diag"] = back
+
+
+## ---- PC finale page ----
+
+func _build_pc_finale_page() -> void:
+	var page := Control.new()
+	page.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.visible = false
+	_pc_layer.add_child(page)
+	_pc_pages["finale"] = page
+	var bg := ColorRect.new()
+	bg.color = C_BG
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	page.add_child(center)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 24)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	center.add_child(box)
+	var t := _pc_label("Gracias por celebrar", 88, C_ACCENT,
+			HORIZONTAL_ALIGNMENT_CENTER)
+	box.add_child(t)
+	var body := _pc_label(
+			"Dia de Muertos honra a quienes amamos.\nHasta el proximo ano.",
+			40, C_CREAM, HORIZONTAL_ALIGNMENT_CENTER)
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(body)
+	var again := _make_button("Journey Again", 44, C_ACCENT)
+	again.pressed.connect(func() -> void: chapter_chosen.emit(0))
+	box.add_child(again)
+	var back := _make_button("Back to chapters", 32, C_ACCENT)
+	back.pressed.connect(func() -> void: _pc_show_page("main"))
+	box.add_child(back)
+	_pc_page_focus["finale"] = again
+
+
 func _rebuild_list() -> void:
+	if _pc_mode:
+		_pc_rebuild_list()
+		return
 	if not _list_built or _list_vbox == null:
 		return
 	_first_row = null
@@ -768,6 +1652,7 @@ func _rebuild_list() -> void:
 		row.pressed.connect(func() -> void:
 			if MarigoldState.music != null:
 				MarigoldState.music.chime(72) # v0.7.0 UI chime
+			MarigoldHaptics.click() # v0.9.3 (A3): the missing tactile half
 			chapter_chosen.emit(idx))
 		_list_vbox.add_child(row)
 	_add_section_header("EXPERIENCES")
@@ -794,6 +1679,7 @@ func _rebuild_list() -> void:
 			row.pressed.connect(func() -> void:
 				if MarigoldState.music != null:
 					MarigoldState.music.chime(72) # v0.7.0 UI chime
+				MarigoldHaptics.click() # v0.9.3 (A3)
 				experience_chosen.emit(k))
 		_list_vbox.add_child(row)
 
@@ -818,7 +1704,8 @@ func _add_section_header(text: String) -> void:
 
 func _make_row(name: String, desc: String) -> Button:
 	var b := Button.new()
-	# wade's permanent branding directive: "Name — built by Muse".
+	# Rows carry the plain chapter name only - "built by Muse" appears
+	# solely on the launcher header (wade's branding rule).
 	b.text = ""
 	b.custom_minimum_size = Vector2(0, 112)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -846,6 +1733,9 @@ func _make_row(name: String, desc: String) -> Button:
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.alignment = BoxContainer.ALIGNMENT_CENTER
 	vb.add_theme_constant_override("separation", 2)
+	# v0.9.3 (U6): a Button is not a Container - without full-rect
+	# anchors the label stack hugs the top-left at minimum size.
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
 	b.add_child(vb)
 	var nl := Label.new()
 	nl.text = name
@@ -915,6 +1805,7 @@ func _build_finale(root: Control) -> void:
 	var again := _make_button("Journey Again", 48, C_ACCENT)
 	again.pressed.connect(func() -> void: chapter_chosen.emit(0))
 	box.add_child(again)
+	_again_btn = again
 
 
 func _build_room_dialog(root: Control) -> void:
@@ -955,15 +1846,27 @@ func _build_room_dialog(root: Control) -> void:
 	var recenter := _make_button("Center panel on me", 34, C_ACCENT)
 	recenter.pressed.connect(func() -> void:
 		_recenter_panel()
-		_room_dialog.visible = false)
+		_room_dialog.visible = false
+		_refocus_first_row())
 	vb.add_child(recenter)
+	_room_center_btn = recenter
 	var close := _make_button("Close", 30, C_DIM)
-	close.pressed.connect(func() -> void: _room_dialog.visible = false)
+	close.pressed.connect(func() -> void:
+		_room_dialog.visible = false
+		_refocus_first_row())
 	vb.add_child(close)
+
+
+func _refocus_first_row() -> void:
+	if _first_row != null and is_instance_valid(_first_row):
+		_first_row.grab_focus()
 
 
 func _show_room_dialog() -> void:
 	_room_dialog.visible = true
+	# v0.9.3 (U3): focus the dialog's primary button.
+	if _room_center_btn != null and is_instance_valid(_room_center_btn):
+		_room_center_btn.grab_focus()
 
 
 ## ---- widget helpers ----
@@ -1278,8 +2181,17 @@ func _update_gaze(delta: float) -> void:
 ## ---- diagnostics + connection test (ship-blocker) ----
 
 func _refresh_diag() -> void:
-	if _diag_label == null:
+	if _diag_label == null and _pc_diag_label == null:
 		return
+	var text := _compose_diag()
+	if _diag_label != null:
+		_diag_label.text = text
+	if _pc_diag_label != null:
+		_pc_diag_label.text = text
+
+
+## The two-line diagnostic text (shared by the VR panel + PC diag page).
+func _compose_diag() -> String:
 	var boot := "…"
 	if _first_frame_s >= 0.0:
 		boot = "%.2fs" % _first_frame_s
@@ -1306,7 +2218,7 @@ func _refresh_diag() -> void:
 	var gt := get_node_or_null("/root/GameplayTelemetry")
 	if gt != null and gt.has_method("relay_status_text"):
 		relay = String(gt.call("relay_status_text"))
-	_diag_label.text = "Headset: %s · Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s\nPad: %s · Last input: %s (%s) · %s" \
+	return "Headset: %s · Controllers: %s · Hands: %s · Gaze: %s · Panel: %s · Boot: first frame %s%s\nPad: %s · Last input: %s (%s) · %s" \
 			% [_headset_model(), ctl, hands, gaze, dist, boot, warn,
 				_diag_pad(), _last_input_text, age, relay]
 
@@ -1359,13 +2271,28 @@ func _diag_hands() -> String:
 	return "none"
 
 
+## Set the connection-test readout on whichever UI exists (VR panel
+## and/or PC diagnostics page).
+func _set_conn_text(text: String, color: Color) -> void:
+	for lab in [_conn_label, _pc_conn_label]:
+		if lab != null:
+			lab.text = text
+			lab.add_theme_color_override("font_color", color)
+
+
 func _test_connection() -> void:
-	if _ping_in_flight:
+	if _ping_in_flight or _ping_http == null:
 		return
 	_ping_in_flight = true
-	_test_button.disabled = true
-	_conn_label.text = "Connection: testing…"
-	_conn_label.add_theme_color_override("font_color", C_DIM)
+	for b in [_test_button, _pc_test_button]:
+		if b != null:
+			b.disabled = true
+	_set_conn_text("Connection: testing…", C_DIM)
+	var diag_text := ""
+	if _diag_label != null:
+		diag_text = _diag_label.text
+	elif _pc_diag_label != null:
+		diag_text = _pc_diag_label.text
 	var payload := {
 		"type": "diag_ping",
 		"app": "marigold",
@@ -1373,7 +2300,7 @@ func _test_connection() -> void:
 				"application/config/version", "0.0.0")),
 		"ts": int(Time.get_unix_time_from_system()),
 		"headset": _headset_model(),
-		"input": _diag_label.text if _diag_label != null else "",
+		"input": diag_text,
 	}
 	_ping_http.request(RELAY_PING_URL,
 			PackedStringArray(["Content-Type: application/json"]),
@@ -1383,14 +2310,13 @@ func _test_connection() -> void:
 func _on_ping_completed(result: int, response_code: int,
 		_headers: PackedStringArray, _body: PackedByteArray) -> void:
 	_ping_in_flight = false
-	_test_button.disabled = false
+	for b in [_test_button, _pc_test_button]:
+		if b != null:
+			b.disabled = false
 	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 \
 			and response_code < 300:
-		_conn_label.text = "Connection: SUCCESS"
-		_conn_label.add_theme_color_override("font_color",
-				Color(0.4, 1.0, 0.5))
+		_set_conn_text("Connection: SUCCESS", Color(0.4, 1.0, 0.5))
 	else:
 		var why := "timeout" if result == HTTPRequest.RESULT_TIMEOUT else \
 				("code %d" % response_code if response_code > 0 else "err")
-		_conn_label.text = "Connection: FAILED (%s)" % why
-		_conn_label.add_theme_color_override("font_color", C_TERRA)
+		_set_conn_text("Connection: FAILED (%s)" % why, C_TERRA)

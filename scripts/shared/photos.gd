@@ -91,11 +91,14 @@ static func snap(node: Node, moment_id: String = "") -> String:
 	if img.save_png(path) != OK:
 		return ""
 	_register_photo(id, path)
-	# v0.7.0 full-featured bar: camera shutter SFX (two-note click-chime).
+	# v0.9.3 (A3): the REAL shutter sample replaces the v0.7.0 two-note
+	# chime stand-in, and snap() itself owns the haptic (callers were
+	# fragmenting it - some added one, most didn't).
 	var music := node.get_node_or_null("/root/MarigoldState")
-	if music != null and music.music != null:
-		music.music.chime(84, 0.5)
-		music.music.chime(88, 0.4)
+	if music != null and music.music != null \
+			and music.music.has_method("play_sfx"):
+		music.music.play_sfx("camera_shutter", -3.0)
+	MarigoldHaptics.click()
 	return path
 
 

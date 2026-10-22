@@ -91,7 +91,10 @@ static func make_light_rig(parent: Node3D, key_energy: float = 1.2) -> Direction
 	var key := DirectionalLight3D.new()
 	key.name = "PolishKeyLight"
 	key.light_energy = key_energy
-	key.shadow_enabled = true
+	# v0.9.3: unshadowed - MarigoldSky's sun is the ONE shadow light
+	# (skills audit E3: rig chapters were paying two directional shadow
+	# passes in stereo).
+	key.shadow_enabled = false
 	key.rotation_degrees = Vector3(-50.0, -30.0, 0.0)
 	parent.add_child(key)
 
@@ -545,7 +548,9 @@ static func make_night_sky(parent: Node) -> WorldEnvironment:
 	env.tonemap_white = 1.2
 	# Vivid "HDR" look for Quest 3 (no true HDR panel): strong bloom on all
 	# emissives, boosted intensities, saturated colors.
-	env.glow_enabled = true
+	# v0.9.3: gated by the quality table (Quest Low/Medium trade glow for
+	# foveated rendering; see MarigoldGfx.glow_on).
+	env.glow_enabled = MarigoldGfx.glow_on()
 	env.glow_intensity = 1.1
 	env.glow_strength = 1.45
 	env.glow_bloom = 0.35

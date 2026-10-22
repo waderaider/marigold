@@ -612,6 +612,9 @@ func _build_environment() -> void:
 	world_env = WorldEnvironment.new()
 	world_env.name = "MarigoldSkyEnv"
 	var sky := Sky.new()
+	# v0.9.3: cap the radiance cubemap - ambient comes from it, and the
+	# default size pays full-res sky shading per chapter (skills audit E5).
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	_sky_mat = ShaderMaterial.new()
 	var sh: Shader = load("res://shaders/sky.gdshader")
 	_sky_mat.shader = sh
@@ -625,7 +628,9 @@ func _build_environment() -> void:
 	_env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	_env.tonemap_exposure = 1.15
 	_env.tonemap_white = 1.2
-	_env.glow_enabled = true
+	# v0.9.3: glow is a quality row now - on Quest Low/Medium it is OFF so
+	# fixed foveated rendering can engage (glow disables FFR). See gfx.gd.
+	_env.glow_enabled = MarigoldGfx.glow_on()
 	_env.glow_intensity = 1.1
 	_env.glow_strength = 1.45
 	_env.glow_bloom = 0.35
@@ -642,14 +647,26 @@ func _build_environment() -> void:
 func _build_sun() -> void:
 	_sun = DirectionalLight3D.new()
 	_sun.name = "MarigoldSun"
-	_sun.shadow_enabled = true
+	# v0.9.3: the sun is the game's ONE shadow light, gated by the quality
+	# table, with a shadow distance bounded to the play space.
+	_sun.shadow_enabled = MarigoldGfx.shadows_on()
+	_sun.directional_shadow_max_distance = 40.0
 	add_child(_sun)
+
+
+## v0.9.3: live-apply the quality table's shadow/glow rows (called by
+## MarigoldGfx._apply when quality changes from the settings page).
+func refresh_quality() -> void:
+	if _sun != null and is_instance_valid(_sun):
+		_sun.shadow_enabled = MarigoldGfx.shadows_on()
+	if _env != null:
+		_env.glow_enabled = MarigoldGfx.glow_on()
 
 
 func _build_rain() -> void:
 	_rain = GPUParticles3D.new()
 	_rain.name = "MarigoldRain"
-	_rain.amount = 600
+	_rain.amount = int(600.0 * MarigoldGfx.particle_scale())
 	_rain.lifetime = 1.1
 	_rain.preprocess = 1.1
 	_rain.visibility_aabb = AABB(Vector3(-20, -20, -20), Vector3(40, 40, 40))
@@ -678,7 +695,7 @@ func _build_rain() -> void:
 func _build_leaves() -> void:
 	_leaves = GPUParticles3D.new()
 	_leaves.name = "MarigoldLeaves"
-	_leaves.amount = 120
+	_leaves.amount = int(120.0 * MarigoldGfx.particle_scale())
 	_leaves.lifetime = 6.0
 	_leaves.preprocess = 6.0
 	_leaves.visibility_aabb = AABB(Vector3(-30, -10, -30), Vector3(60, 20, 60))

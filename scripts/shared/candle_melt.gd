@@ -191,7 +191,21 @@ func _batch_node(mm: MultiMesh, nm: String) -> MultiMeshInstance3D:
 
 # -------------------------------------------------------------- discovery
 
+## v0.9.3 (R4): the freed-candle prune, shared by _step and _discover.
+## At speed x0 _step never runs, so without this a chapter change
+## leaked dead entries into _candles/_by_root forever.
+func _prune_freed() -> void:
+	for i in range(_candles.size() - 1, -1, -1):
+		if _n3(_candles[i]["root"]) == null:
+			_by_root.erase(int(_candles[i].get("root_id", -1)))
+			_release_candle_frozen(_candles[i])
+			if int(_candles[i].get("pool_slot", -1)) >= 0 and _pool_mm != null:
+				_pool_mm.set_instance_transform(int(_candles[i]["pool_slot"]), _hidden_xf)
+			_candles.remove_at(i)
+
+
 func _discover() -> void:
+	_prune_freed()
 	for root in get_tree().get_nodes_in_group("marigold_candles"):
 		var n := root as Node3D
 		if n == null or _by_root.has(n.get_instance_id()):
@@ -273,13 +287,7 @@ func _process(delta: float) -> void:
 
 func _step(dt: float) -> void:
 	# Prune freed candles (chapter changes).
-	for i in range(_candles.size() - 1, -1, -1):
-		if _n3(_candles[i]["root"]) == null:
-			_by_root.erase(int(_candles[i].get("root_id", -1)))
-			_release_candle_frozen(_candles[i])
-			if int(_candles[i].get("pool_slot", -1)) >= 0:
-				_pool_mm.set_instance_transform(int(_candles[i]["pool_slot"]), _hidden_xf)
-			_candles.remove_at(i)
+	_prune_freed()
 	var cam := get_viewport().get_camera_3d() if get_viewport() != null else null
 	var cam_pos := cam.global_position if cam != null else Vector3.ZERO
 	for c in _candles:

@@ -1,6 +1,10 @@
 shader_type sky;
+render_mode use_quarter_res_pass;
 // MarigoldSky procedural sky: gradient + sun/moon discs + stars + 2-octave
 // value-noise clouds. Quest-3-perf: no volumetrics, cheap hash noise only.
+// v0.9.3: the visible pass runs at quarter resolution; the radiance
+// (cubemap) pass outputs gradient + sun only - no cloud/star noise is
+// baked into ambient (skills audit E5).
 
 uniform vec4 sky_top_color : source_color = vec4(0.25, 0.12, 0.45, 1.0);
 uniform vec4 sky_horizon_color : source_color = vec4(1.0, 0.45, 0.15, 1.0);
@@ -8,10 +12,10 @@ uniform vec4 ground_horizon_color : source_color = vec4(0.20, 0.08, 0.15, 1.0);
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
 uniform vec4 sun_color : source_color = vec4(1.0, 0.5, 0.2, 1.0);
 uniform vec3 moon_dir = vec3(0.0, -1.0, 0.0);
-uniform float night_factor = 0.0; // 0 = full day, 1 = full night
-uniform float cloud_cover = 0.1; // 0..1 cloud threshold
+uniform float night_factor : hint_range(0.0, 1.0) = 0.0; // 0 = full day, 1 = full night
+uniform float cloud_cover : hint_range(0.0, 1.0) = 0.1; // 0..1 cloud threshold
 uniform float cloud_drift = 0.0; // animated from GDScript (time * wind)
-uniform float dim_factor = 1.0; // weather dimming multiplier
+uniform float dim_factor : hint_range(0.0, 1.0) = 1.0; // weather dimming multiplier
 
 float hash13(vec3 p) {
 	p = fract(p * 0.1031);
@@ -61,7 +65,26 @@ float cloud_field(vec3 dir) {
 void sky() {
 	vec3 dir = normalize(EYEDIR);
 	float up = dir.y;
+	float sdot = dot(dir, normalize(sun_dir));
 
+	if (AT_QUARTER_RES_PASS) {
+		// v0.9.3: clouds - the expensive noise - live ONLY in the
+		// quarter-res pass. The engine composites this over the main
+		// pass using COLOR.a as the blend factor, which reproduces the
+		// old mix(col, cloud_col, clouds * 0.92) exactly.
+		float clouds = cloud_field(dir);
+		float day_lit = clamp(sdot * 0.5 + 0.5, 0.0, 1.0);
+		vec3 cloud_lit = mix(vec3(0.10, 0.08, 0.14), sun_color.rgb * 1.15, day_lit);
+		cloud_lit = mix(cloud_lit, vec3(0.05, 0.05, 0.10), night_factor * 0.85);
+		vec3 cloud_dark = cloud_lit * 0.45;
+		float shade = vnoise(dir.xz / max(dir.y + 0.28, 0.05) * 3.4
+				+ vec2(cloud_drift * 1.7, 0.0));
+		vec3 cloud_col = mix(cloud_dark, cloud_lit, shade) * dim_factor;
+		COLOR = vec4(cloud_col, clouds * 0.92);
+		return;
+	}
+
+	// Main pass (and the radiance cubemap pass): gradient + sun + moon.
 	// Base gradient.
 	vec3 col = mix(sky_horizon_color.rgb, sky_top_color.rgb,
 			pow(clamp(up, 0.0, 1.0), 0.55));
@@ -71,7 +94,6 @@ void sky() {
 	}
 
 	// Sun disc + glow.
-	float sdot = dot(dir, normalize(sun_dir));
 	float disc = smoothstep(0.99935, 0.99965, sdot);
 	float glow = pow(clamp(sdot, 0.0, 1.0), 20.0) * 0.45
 			+ pow(clamp(sdot, 0.0, 1.0), 160.0) * 0.9;
@@ -83,20 +105,12 @@ void sky() {
 	float moon_halo = pow(clamp(mdot, 0.0, 1.0), 600.0) * 0.6 * night_factor;
 	col += vec3(0.85, 0.9, 1.0) * (moon * 1.6 + moon_halo);
 
-	// Stars (gated by night).
-	col += vec3(0.9, 0.93, 1.0) * star_field(dir) * night_factor
-			* smoothstep(0.0, 0.25, up);
-
-	// Clouds.
-	float clouds = cloud_field(dir);
-	float day_lit = clamp(sdot * 0.5 + 0.5, 0.0, 1.0);
-	vec3 cloud_lit = mix(vec3(0.10, 0.08, 0.14), sun_color.rgb * 1.15, day_lit);
-	cloud_lit = mix(cloud_lit, vec3(0.05, 0.05, 0.10), night_factor * 0.85);
-	vec3 cloud_dark = cloud_lit * 0.45;
-	float shade = vnoise(dir.xz / max(dir.y + 0.28, 0.05) * 3.4
-			+ vec2(cloud_drift * 1.7, 0.0));
-	vec3 cloud_col = mix(cloud_dark, cloud_lit, shade);
-	col = mix(col, cloud_col, clouds * 0.92);
+	// Stars (gated by night) - main visible pass only, never baked
+	// into the radiance cubemap.
+	if (!AT_CUBEMAP_PASS) {
+		col += vec3(0.9, 0.93, 1.0) * star_field(dir) * night_factor
+				* smoothstep(0.0, 0.25, up);
+	}
 
 	col *= dim_factor;
 	COLOR = col;

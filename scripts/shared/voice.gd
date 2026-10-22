@@ -15,17 +15,26 @@ const BUS_NAME := "Voice"
 var _bus_idx := -1
 var _analyzer: AudioEffectSpectrumAnalyzerInstance = null
 var _env := 0.0
+var _current_player: AudioStreamPlayer = null
+var _stream_cache := {}
 
 
 func _ready() -> void:
-	_bus_idx = AudioServer.bus_count
-	AudioServer.add_bus(_bus_idx)
-	AudioServer.set_bus_name(_bus_idx, BUS_NAME)
-	AudioServer.set_bus_send(_bus_idx, "Master")
+	# v0.9.3: the Voice bus ships in default_bus_layout.tres (with a
+	# gentle compressor). Reuse it when present - the old code appended
+	# a duplicate bus at whatever index bus_count happened to be, and
+	# would have attached the analyzer over the layout's effects.
+	_bus_idx = AudioServer.get_bus_index(BUS_NAME)
+	if _bus_idx < 0:
+		_bus_idx = AudioServer.bus_count
+		AudioServer.add_bus(_bus_idx)
+		AudioServer.set_bus_name(_bus_idx, BUS_NAME)
+		AudioServer.set_bus_send(_bus_idx, "Master")
 	var fx := AudioEffectSpectrumAnalyzer.new()
 	fx.buffer_length = 0.25
+	var slot := AudioServer.get_bus_effect_count(_bus_idx)
 	AudioServer.add_bus_effect(_bus_idx, fx)
-	_analyzer = AudioServer.get_bus_effect_instance(_bus_idx, 0) as AudioEffectSpectrumAnalyzerInstance
+	_analyzer = AudioServer.get_bus_effect_instance(_bus_idx, slot) as AudioEffectSpectrumAnalyzerInstance
 
 
 func _process(_delta: float) -> void:
@@ -57,11 +66,18 @@ func play_dialogue(stream: AudioStream, speaker: String = "", text: String = "",
 		MarigoldCaptions.show(speaker, text, dur)
 	if stream == null:
 		return
+	# v0.9.3: single-voice policy - a new line replaces the one still
+	# playing instead of stacking voices over each other (the caption
+	# model is single-line; the audio now matches it).
+	if _current_player != null and is_instance_valid(_current_player):
+		_current_player.stop()
+		_current_player.queue_free()
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
 	p.volume_db = volume_db
 	p.bus = BUS_NAME
 	add_child(p)
+	_current_player = p
 	p.play()
 	p.finished.connect(p.queue_free)
 
@@ -70,7 +86,12 @@ func play_dialogue(stream: AudioStream, speaker: String = "", text: String = "",
 ## assets/audio/voice/<chapter>/<speaker>_<key>.wav; if missing, caption only.
 func play_line(chapter: String, speaker: String, key: String, text: String, volume_db: float = -4.0) -> void:
 	var path := "res://assets/audio/voice/%s/%s_%s.wav" % [chapter, speaker.to_lower(), key]
-	var stream: AudioStream = null
-	if ResourceLoader.exists(path):
+	# v0.9.3: cache loaded streams - replaying a line used to re-read
+	# the WAV from disk every time. Path format is unchanged (voice
+	# file names, including accented speakers, are load-bearing).
+	var stream: AudioStream = _stream_cache.get(path)
+	if stream == null and ResourceLoader.exists(path):
 		stream = load(path) as AudioStream
+		if stream != null:
+			_stream_cache[path] = stream
 	play_dialogue(stream, speaker, text, volume_db)

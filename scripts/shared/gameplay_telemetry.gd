@@ -169,6 +169,21 @@ func error(chapter_name: String, message: String, context: String = "") -> void:
 
 # ----------------------------------------------------------------- flush ---
 
+## v0.9.3 (R1): the batch in flight, kept so a failed send can re-queue
+## it instead of dropping a session silently (the old header comment
+## claimed events "stay in memory when offline" - sent batches did not).
+var _inflight: Array = []
+
+
+func _requeue_inflight() -> void:
+	if _inflight.is_empty():
+		return
+	_events = _inflight + _events
+	_inflight = []
+	while _events.size() > MAX_EVENTS:
+		_events.remove_at(0)
+
+
 ## POST the current batch to the relay. Tiny payloads, async, never blocking.
 ## Events stay in memory when offline or URL-less (ring buffer, oldest dropped).
 func _flush_now() -> void:
@@ -187,21 +202,32 @@ func _flush_now() -> void:
 		"timestamp": _iso_now(),
 		"events": _events.duplicate(),
 	}
+	_inflight = _events.duplicate()
 	_events.clear()
 	var body := JSON.stringify(payload)
-	_http.request(_report_url, PackedStringArray(["Content-Type: application/json"]),
+	var err := _http.request(_report_url,
+			PackedStringArray(["Content-Type: application/json"]),
 			HTTPClient.METHOD_POST, body)
+	if err != OK:
+		# Request never started (no route/DNS): re-queue, unstick the
+		# flush flag, and let the next timer retry.
+		_requeue_inflight()
+		_flushing = false
+		_last_flush_text = "FAILED (request error %d)" % err
 
 
 func _on_flush_completed(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
 	_flushing = false
 	var d := Time.get_time_dict_from_system()
 	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300:
+		_inflight = []
 		_last_flush_text = "OK %02d:%02d" % [int(d["hour"]), int(d["minute"])]
 	else:
-		# Offline/failed: events for this batch are dropped (telemetry is
-		# ephemeral by design; crashes still persist via the crash reporter).
-		_last_flush_text = "FAILED (%s) %02d:%02d" % [
+		# v0.9.3 (R1): offline/failed batches RE-QUEUE (front of the
+		# queue, capped) instead of vanishing - an offline session is
+		# exactly the session we most need to see. Bounded by MAX_EVENTS.
+		_requeue_inflight()
+		_last_flush_text = "QUEUED (%s) %02d:%02d" % [
 				("code %d" % response_code) if response_code > 0 else "no connection",
 				int(d["hour"]), int(d["minute"])]
 
@@ -232,8 +258,24 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 		var remote := str((data as Dictionary).get("report_url", "")).strip_edges()
 		# Only the remote manifest may override the compiled-in fallback;
 		# an empty field must never blank a working URL.
-		if remote != "":
+		# v0.9.3 (R2): ...and only toward OUR relay host - a poisoned or
+		# mistyped manifest must not redirect telemetry to a third party.
+		if remote != "" and _relay_host_ok(remote):
 			_report_url = remote
+		elif remote != "":
+			push_warning("gameplay_telemetry: remote report_url host rejected: " + remote)
+
+
+## v0.9.3 (R2): the only host remote config may point reports at.
+const RELAY_HOST := "nexus-log-relay.wade-relay.workers.dev"
+
+
+static func _relay_host_ok(url: String) -> bool:
+	var h := url.trim_prefix("https://").trim_prefix("http://")
+	var slash := h.find("/")
+	if slash > 0:
+		h = h.substr(0, slash)
+	return h == RELAY_HOST
 
 
 ## v0.7.0 PC VR (QA §1.11): distinct platform tag so the digest can split

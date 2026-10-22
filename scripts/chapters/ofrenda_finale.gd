@@ -248,6 +248,10 @@ func _update_candle_progress() -> void:
 		for i in range(maxi(_last_lit, 0), lit):
 			if i < _candle_flames.size():
 				MarigoldSpectacle.candle_ignite(_stage, _candle_flames[i])
+			# v0.9.3 (A3): ignitions were silent - real ignite sample.
+			if MarigoldState.music != null:
+				MarigoldState.music.play_sfx("candle_ignite", -7.0)
+		MarigoldHaptics.thump()
 		_last_lit = lit
 	for i in _candle_mats.size():
 		var m: StandardMaterial3D = _candle_mats[i]

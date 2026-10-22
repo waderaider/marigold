@@ -12,9 +12,16 @@
 ## - Viewport.scaling_3d_mode: FSR on Low (cheap upscale), bilinear above.
 ## - Particle density: MarigoldGfx.particle_scale() consumed by the MarigoldFX
 ##   spawn helpers (motes/petals/confetti/sparks): 0.5 / 0.75 / 1.0 / 1.25.
-## Shadows: MARIGOLD ships baked/disabled shadows by design (perf
-## non-negotiable in DESIGN_VISION.md) — there is no global shadow-quality
-## API to drive, so no shadow toggle shipped (audit rule).
+## Shadows (v0.9.3, skills audit): the game owns both shadowed lights
+## (MarigoldSky sun + the retired rig key), so shadows ARE a real knob:
+## Low/Medium -> sun shadow off; High/Ultra -> on. The light-rig key is
+## now always unshadowed (the sun is the one shadow light).
+## Foveation (v0.9.3): OpenXRInterface.foveation_level is set in main.gd
+## before initialize(). Godot disables foveation while glow post-effects
+## run, so on Quest the tiers make that trade-off explicitly:
+## Low/Medium -> FFR 3/2 (dynamic) + glow OFF; High -> glow ON + FFR off.
+## Ultra is PC-only (Quest maps Ultra -> High) and Quest caps are
+## scale <= 1.0, MSAA <= 2X; Quest default quality is Medium.
 ##
 ## Persisted in MarigoldSettings (user://marigold_settings.cfg), applied at
 ## boot BEFORE the first frame from MarigoldState._ready (autoloads run
@@ -34,8 +41,47 @@ static var _particle_scale := 1.0
 
 
 static func quality() -> String:
-	var q := str(MarigoldSettings.get_value("gfx", "quality", "high"))
-	return q if QUALITIES.has(q) else "high"
+	var def := "medium" if OS.has_feature("android") else "high"
+	var q := str(MarigoldSettings.get_value("gfx", "quality", def))
+	return q if QUALITIES.has(q) else def
+
+
+## The tier that actually renders: on Quest, Ultra maps to High (1.25x
+## supersampling + MSAA 4X is a self-inflicted frame-killer standalone).
+static func effective_quality() -> String:
+	var q := quality()
+	if q == "ultra" and OS.has_feature("android"):
+		return "high"
+	return q
+
+
+## Shadow row of the quality table (v0.9.3): High/Ultra cast the sun's
+## shadow; Low/Medium do not. Consulted by MarigoldSky at build time and
+## re-applied live via MarigoldSky.refresh_quality().
+static func shadows_on() -> bool:
+	return effective_quality() == "high" or effective_quality() == "ultra"
+
+
+## Glow row (v0.9.3): on Quest, glow runs only at High — Low/Medium trade
+## it away so fixed foveated rendering can engage (glow disables FFR in
+## the OpenXR path). PC keeps glow at every tier.
+static func glow_on() -> bool:
+	if OS.has_feature("android"):
+		return effective_quality() == "high"
+	return true
+
+
+## FFR row (v0.9.3): OpenXRInterface.foveation_level for the persisted
+## quality. 0 = off. Only meaningful on Quest; set pre-initialize.
+static func foveation_level() -> int:
+	if not OS.has_feature("android"):
+		return 0
+	match effective_quality():
+		"low":
+			return 3
+		"medium":
+			return 2
+	return 0
 
 
 static func set_quality(q: String) -> void:
@@ -73,13 +119,14 @@ static func _scale_for(q: String) -> float:
 
 ## Apply at boot (MarigoldState._ready, before first frame) or live from the
 ## settings page. All API verified against Godot 4.7.2.
-static func _apply(q: String) -> void:
-	_particle_scale = _scale_for(q)
+static func _apply(_q: String) -> void:
+	_particle_scale = _scale_for(effective_quality())
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null or tree.root == null:
 		return
 	var vp: Viewport = tree.root
-	match q:
+	var on_quest := OS.has_feature("android")
+	match effective_quality():
 		"low":
 			vp.scaling_3d_scale = 0.70
 			vp.msaa_3d = Viewport.MSAA_DISABLED
@@ -90,15 +137,79 @@ static func _apply(q: String) -> void:
 			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		"high":
 			vp.scaling_3d_scale = 1.0
-			vp.msaa_3d = Viewport.MSAA_4X
+			# Quest cap: MSAA 2X in Compatibility stereo (4X is bandwidth-
+			# bound on the tiled GPU); PC keeps 4X.
+			vp.msaa_3d = Viewport.MSAA_2X if on_quest else Viewport.MSAA_4X
 			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
-		_: # ultra: supersample harder
+		_: # ultra (PC only; Quest already mapped to high above)
 			vp.scaling_3d_scale = 1.25
 			vp.msaa_3d = Viewport.MSAA_4X
 			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	# Shadow/glow rows apply live to the sky's sun + environment.
+	var sky_inst: Variant = MarigoldSky.instance
+	if sky_inst != null and is_instance_valid(sky_inst):
+		sky_inst.refresh_quality()
+
+
+# ---- audio volumes (v0.9.3 A7: real bus volumes, persisted) ----
+
+const VOL_STEPS: Array[int] = [0, 25, 50, 75, 100]
+
+
+static func _bus_volume_pct(key: String) -> int:
+	return int(MarigoldSettings.get_value("audio", key, 100))
+
+
+static func _apply_bus_volume(bus: String, pct: int) -> void:
+	var idx := AudioServer.get_bus_index(bus)
+	if idx < 0:
+		return
+	var f := clampf(float(pct) / 100.0, 0.0, 1.0)
+	AudioServer.set_bus_volume_db(idx,
+			-60.0 if f <= 0.001 else linear_to_db(f))
+
+
+static func _cycle_bus_volume(key: String, bus: String) -> void:
+	var cur := _bus_volume_pct(key)
+	var idx := VOL_STEPS.find(cur)
+	var nxt: int = VOL_STEPS[(idx + 1) % VOL_STEPS.size()] \
+			if idx >= 0 else VOL_STEPS[VOL_STEPS.size() - 1]
+	MarigoldSettings.set_value("audio", key, nxt)
+	_apply_bus_volume(bus, nxt)
+
+
+static func music_vol_label() -> String:
+	return "%d%%" % _bus_volume_pct("music_vol")
+
+
+static func sfx_vol_label() -> String:
+	return "%d%%" % _bus_volume_pct("sfx_vol")
+
+
+static func voice_vol_label() -> String:
+	return "%d%%" % _bus_volume_pct("voice_vol")
+
+
+static func cycle_music_volume() -> void:
+	_cycle_bus_volume("music_vol", "Music")
+
+
+static func cycle_sfx_volume() -> void:
+	_cycle_bus_volume("sfx_vol", "SFX")
+
+
+static func cycle_voice_volume() -> void:
+	_cycle_bus_volume("voice_vol", "Voice")
+
+
+static func apply_audio_volumes() -> void:
+	_apply_bus_volume("Music", _bus_volume_pct("music_vol"))
+	_apply_bus_volume("SFX", _bus_volume_pct("sfx_vol"))
+	_apply_bus_volume("Voice", _bus_volume_pct("voice_vol"))
 
 
 static func apply_boot() -> void:
+	apply_audio_volumes()
 	_apply(quality())
 
 

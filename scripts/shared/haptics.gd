@@ -15,6 +15,12 @@ const STRONG := 0.9
 static func pulse(amplitude: float = MEDIUM, duration: float = 0.12, hand: int = -1) -> void:
 	var xr := XRServer.find_interface("OpenXR")
 	if xr == null:
+		# v0.9.3 (A6): gamepad fallback - PC players on an Xbox pad
+		# ("Every Input Works") feel haptics too; no-op without a pad.
+		var pads := Input.get_connected_joypads()
+		if not pads.is_empty():
+			var a := clampf(amplitude, 0.0, 1.0)
+			Input.start_joy_vibration(pads[0], a * 0.6, a, duration)
 		return
 	if not xr.has_method("trigger_haptic_pulse"):
 		return
@@ -40,8 +46,13 @@ static func thump() -> void:
 
 ## Convenience: celebration burst (two pulses).
 static func fanfare() -> void:
+	# v0.9.3 (A6): actually two pulses (the second was caller-scheduled
+	# before and never fired). Same await-timer shape as deny().
 	pulse(STRONG, 0.10)
-	# Second pulse is scheduled by the caller via a timer if desired.
+	var t := Engine.get_main_loop()
+	if t != null:
+		await t.create_timer(0.12).timeout
+		pulse(STRONG, 0.16)
 
 
 ## ---- Haptic vocabulary (v0.5.0) ----

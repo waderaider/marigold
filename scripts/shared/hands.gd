@@ -122,20 +122,17 @@ static func pointer_ray(node: Node3D, hand: int = HAND_RIGHT) -> Array:
 
 ## Save an object's transform as a named spatial anchor (persists in user://).
 static func save_anchor(anchor_name: String, t: Transform3D) -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(ANCHOR_FILE) # ignore errors; missing file is fine
+	var cfg := MarigoldSettings.load_cfg(ANCHOR_FILE) # missing file is fine
 	cfg.set_value("anchors", anchor_name + "_pos", t.origin)
 	cfg.set_value("anchors", anchor_name + "_basis_x", t.basis.x)
 	cfg.set_value("anchors", anchor_name + "_basis_y", t.basis.y)
 	cfg.set_value("anchors", anchor_name + "_basis_z", t.basis.z)
-	cfg.save(ANCHOR_FILE)
+	MarigoldSettings.save_cfg(cfg, ANCHOR_FILE)
 
 
 ## Load a saved anchor transform. Returns null when none was saved.
 static func load_anchor(anchor_name: String) -> Variant:
-	var cfg := ConfigFile.new()
-	if cfg.load(ANCHOR_FILE) != OK:
-		return null
+	var cfg := MarigoldSettings.load_cfg(ANCHOR_FILE)
 	if not cfg.has_section_key("anchors", anchor_name + "_pos"):
 		return null
 	var t := Transform3D()

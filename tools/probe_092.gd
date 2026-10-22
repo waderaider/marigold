@@ -2,7 +2,12 @@
 ## Prints the parsed events for the gamepad-touched actions and the
 ## built-in ui_* navigation actions, so the [input] serialization and
 ## Godot's default joypad GUI-nav bindings are verified, not assumed.
-## Run: godot --headless --script tools/probe_092.gd
+## v0.9.3 (T1): ASSERTS instead of just printing - every required
+## action must exist and carry at least one event; exit code 1 on any
+## failure so CI/wrappers can gate on it.
+## Canonical run (once per checkout: --import; then):
+##   godot --headless --path . --import
+##   godot --headless --path . --script res://tools/probe_092.gd
 extends SceneTree
 
 
@@ -26,11 +31,19 @@ func _describe(action: StringName) -> String:
 
 
 func _initialize() -> void:
+	var failures := 0
 	for a in ["interact", "teleport_confirm", "move_forward", "move_back",
 			"move_left", "move_right", "sprint", "pause_menu"]:
 		print("[probe092] ", _describe(a))
+		if not InputMap.has_action(a) or InputMap.action_get_events(a).is_empty():
+			failures += 1
+			print("[probe092] FAIL: action missing or eventless: ", a)
 	for a in ["ui_accept", "ui_cancel", "ui_up", "ui_down", "ui_left",
 			"ui_right", "ui_focus_next", "ui_page_up", "ui_page_down"]:
 		print("[probe092] ", _describe(a))
+		if not InputMap.has_action(a) or InputMap.action_get_events(a).is_empty():
+			failures += 1
+			print("[probe092] FAIL: ui action missing or eventless: ", a)
 	print("[probe092] joypads connected: ", Input.get_connected_joypads())
-	quit()
+	print("[probe092] ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
+	quit(1 if failures > 0 else 0)

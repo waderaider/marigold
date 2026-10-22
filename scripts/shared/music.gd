@@ -55,7 +55,7 @@ func _ready() -> void:
 		var p := AudioStreamPlayer.new()
 		p.name = "Music_" + mood
 		p.volume_db = _volume_db
-		p.bus = "Master"
+		p.bus = "Music" # v0.9.3: bus layout (was Master - no graph at all)
 		add_child(p)
 		_players[mood] = p
 
@@ -162,7 +162,7 @@ func play_ambience(kind: String) -> void:
 		p = AudioStreamPlayer.new()
 		p.name = "Amb_" + kind
 		p.volume_db = _amb_volume_db
-		p.bus = "Master"
+		p.bus = "Ambience" # v0.9.3: bus layout
 		add_child(p)
 		_amb_players[kind] = p
 		var stream: AudioStreamWAV = load(AUDIO_DIR + kind + ".wav")
@@ -206,7 +206,7 @@ func play_thunder(intensity: float = 1.0) -> void:
 	var p := AudioStreamPlayer.new()
 	p.stream = _thunder_stream
 	p.volume_db = lerpf(-16.0, -2.0, clampf(intensity, 0.0, 1.0))
-	p.bus = "Master"
+	p.bus = "SFX" # v0.9.3: bus layout
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
@@ -230,7 +230,8 @@ func play_stinger(kind: String, volume_db: float = -6.0) -> void:
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
 	p.volume_db = volume_db
-	p.bus = "Master"
+	p.bus = "SFX" # v0.9.3: bus layout
+	_vary(p) # v0.9.3: no sample-identical repeats (audio-design P3)
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
@@ -258,11 +259,18 @@ func play_sfx(kind: String, volume_db: float = -6.0) -> void:
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
 	p.volume_db = volume_db
-	p.bus = "Master"
+	p.bus = "SFX" # v0.9.3: bus layout
+	_vary(p) # v0.9.3: pitch/volume wobble (audio-design Pattern 3)
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
 	_bump_energy(0.7)
+
+
+## v0.9.3: one-shot variation so repeats never sound sample-identical.
+static func _vary(p: AudioStreamPlayer) -> void:
+	p.pitch_scale *= randf_range(0.94, 1.06)
+	p.volume_db += randf_range(-1.5, 1.5)
 
 
 ## ---- Spatial 3D audio (v0.7.0 — wade's permanent rule) ----
@@ -318,7 +326,12 @@ func get_beat_phase() -> float:
 	if p == null or not p.playing:
 		return -1.0
 	var bpm: float = BEAT_BPM.get(_current_mood, 60.0)
-	var pos := p.get_playback_position()
+	# v0.9.3 (godot-audio Pattern 4): compensate mix + output latency,
+	# or beat-synced dance/flicker sits a variable fraction of a beat
+	# behind the audible beat (worst on Bluetooth/VD audio paths).
+	var pos := p.get_playback_position() \
+			+ AudioServer.get_time_since_last_mix() \
+			- AudioServer.get_output_latency()
 	return fmod(pos * bpm / 60.0, 1.0)
 
 
@@ -378,6 +391,7 @@ func pluck(midi_note: int, volume: float = 0.8, duration: float = 1.2, damp: flo
 	var p := AudioStreamPlayer.new()
 	p.stream = wav
 	p.volume_db = -4.0
+	p.bus = "SFX" # v0.9.3: bus layout (pluck/chime were implicit Master)
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)

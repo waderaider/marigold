@@ -1,8 +1,13 @@
 ## run_chapters_headless.gd - MARIGOLD v0.6.0 headless verification.
 ## Loads every chapter/experience scene, calls setup(false), runs 60 frames,
-## reports any SCRIPT ERRORs. Run:
-##   godot --headless --script tools/run_chapters_headless.gd
-## (res:// resolves because the script lives inside the project.)
+## reports any SCRIPT ERRORs.
+## Canonical run (once per checkout: --import; then):
+##   godot --headless --path . --import
+##   godot --headless --path . --script res://tools/run_chapters_headless.gd
+## v0.9.3 (T1): scene load/instantiate/missing-script failures are
+## counted and become the process EXIT CODE (the shell wrapper also
+## greps the log for SCRIPT ERROR lines, which GDScript cannot count
+## from inside).
 ## NOTE: nodes added during SceneTree._initialize get _ready deferred, so
 ## setup() is always called on the frame AFTER add_child.
 extends SceneTree
@@ -49,7 +54,8 @@ func _process(_delta: float) -> bool:
 		_node = null
 		_idx += 1
 		if _idx >= SCENES.size():
-			print("[harness] DONE. total script errors: ", _errors)
+			print("[harness] DONE. failed scenes: ", _errors)
+			quit(mini(_errors, 125))
 			return true
 		_next()
 	return false
@@ -63,5 +69,15 @@ func _next() -> void:
 		_frame = 0
 		return
 	_node = ps.instantiate()
+	if _node == null:
+		print("[harness] INSTANTIATE FAILED: ", SCENES[_idx])
+		_errors += 1
+		_frame = 0
+		return
+	if _node.get_script() == null:
+		# A chapter root without its script = parse failure upstream;
+		# the scene "loads" but the chapter is dead. Count it.
+		print("[harness] ROOT SCRIPT MISSING: ", SCENES[_idx])
+		_errors += 1
 	root.add_child(_node)
 	_frame = -1 # setup on next frame

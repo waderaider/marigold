@@ -90,6 +90,7 @@ static func update(node: Node, delta: float) -> bool:
 			tw.parallel().tween_property(ring, "transparency", 1.0, 0.7)
 			tw.tween_callback(ring.queue_free)
 			MarigoldHaptics.confirm()
+			_sfx(node, "petal_rustle")
 		var arc: Node3D = st["arc"]
 		if arc != null and is_instance_valid(arc):
 			arc.queue_free()
@@ -161,6 +162,7 @@ const LASER_MIN_DIST := 0.8
 const LASER_MAX_DIST := 10.0
 const LASER_MIN_DOWN := 0.18 # aim must point down this much to count
 const LASER_COOLDOWN := 0.6
+const CONFIRM_BUFFER := 0.12 # s a confirm press stays valid (input-systems P3)
 
 
 static func is_arc_active(node: Node) -> bool:
@@ -228,6 +230,7 @@ static func laser_begin(node: Node, world: Node3D, floor_y: float = 1e9) -> Dict
 	node.add_child(beam)
 	var rig := {"world": world, "floor_y": gy, "marker": marker,
 		"beam": beam, "trig_was": false, "pinch_was": false,
+		"rt_was": false, "confirm_buffer": 0.0,
 		"cool": 0.0, "t": 0.0, "hit": Vector3.ZERO, "valid": false,
 		"fade": null, "aim_origin": Vector3.ZERO, "aim_dir": Vector3(0, 0, -1)}
 	_lasers[node] = rig
@@ -262,6 +265,7 @@ static func laser_update(node: Node, rig: Dictionary, delta: float) -> void:
 		return
 	rig["t"] = float(rig["t"]) + delta
 	rig["cool"] = maxf(0.0, float(rig["cool"]) - delta)
+	rig["confirm_buffer"] = maxf(0.0, float(rig.get("confirm_buffer", 0.0)) - delta)
 	var aim := _laser_aim(node)
 	var origin: Vector3 = aim[0]
 	var dir: Vector3 = aim[1]
@@ -288,24 +292,34 @@ static func laser_update(node: Node, rig: Dictionary, delta: float) -> void:
 	var st: Node = node.get_node_or_null("/root/MarigoldState")
 	var pc := st != null and st.has_method("is_pc_mode") \
 			and bool(st.call("is_pc_mode"))
+	# v0.9.3 (input-systems Pattern 3): input buffering. A confirm press
+	# is remembered for CONFIRM_BUFFER seconds and fires the instant aim
+	# + cooldown allow - the old same-frame gate silently ate presses
+	# made while the aim was still sweeping into validity or during the
+	# cooldown, and one shared latch let a held trigger swallow a later
+	# RT press. Per-source latches now; buffer consumed on fire.
 	var confirm := false
 	if pc:
 		if InputMap.has_action("teleport_confirm") \
 				and Input.is_action_just_pressed("teleport_confirm"):
-			confirm = true
+			rig["confirm_buffer"] = CONFIRM_BUFFER
 	else:
 		# Trigger edge (primary) / pinch edge (fallback when no controller live).
 		var trig := false
 		if InputMap.has_action("trigger_click") and Input.is_action_pressed("trigger_click"):
 			trig = true
+		var trig_edge := trig and not bool(rig["trig_was"])
+		rig["trig_was"] = trig
 		# v0.9.2: gamepad RT (teleport_confirm) also confirms in XR mode —
 		# Bluetooth pad on Quest, or the Xbox pad while streaming via
 		# Virtual Desktop (launch mode is VR there, but a real pad exists).
+		# v0.9.3: its OWN latch (rt_was) - it no longer shares trig's.
+		var rt := false
 		if InputMap.has_action("teleport_confirm") \
-				and Input.is_action_just_pressed("teleport_confirm"):
-			trig = true
-		var trig_edge := trig and not bool(rig["trig_was"])
-		rig["trig_was"] = trig
+				and Input.is_action_pressed("teleport_confirm"):
+			rt = true
+		var rt_edge := rt and not bool(rig.get("rt_was", false))
+		rig["rt_was"] = rt
 		var pinched := false
 		if not have_aim or not _any_controller_live(node):
 			for h in [MarigoldHands.HAND_RIGHT, MarigoldHands.HAND_LEFT]:
@@ -314,8 +328,11 @@ static func laser_update(node: Node, rig: Dictionary, delta: float) -> void:
 					break
 		var pinch_edge := pinched and not bool(rig["pinch_was"])
 		rig["pinch_was"] = pinched
-		confirm = trig_edge or pinch_edge
+		if trig_edge or rt_edge or pinch_edge:
+			rig["confirm_buffer"] = CONFIRM_BUFFER
+	confirm = float(rig["confirm_buffer"]) > 0.0
 	if valid and float(rig["cool"]) <= 0.0 and confirm:
+		rig["confirm_buffer"] = 0.0 # consume on fire
 		_do_laser_teleport(node, rig, hit)
 
 
@@ -427,6 +444,13 @@ static func _update_laser_visuals(rig: Dictionary, origin: Vector3, dir: Vector3
 				m.emission_energy_multiplier = e
 
 
+## v0.9.3 (A3): one-shot SFX through the shared music player.
+static func _sfx(node: Node, sfx_name: String, vol_db: float = -5.0) -> void:
+	var st := node.get_node_or_null("/root/MarigoldState")
+	if st != null and st.music != null and st.music.has_method("play_sfx"):
+		st.music.play_sfx(sfx_name, vol_db)
+
+
 ## World-shift + quick fade blink + arrival bloom (petal motif).
 static func _do_laser_teleport(node: Node, rig: Dictionary, hit: Vector3) -> void:
 	var world: Node3D = rig["world"]
@@ -450,6 +474,8 @@ static func _do_laser_teleport(node: Node, rig: Dictionary, hit: Vector3) -> voi
 	if st != null and st.music != null:
 		st.music.chime(67, 0.35)
 		st.music.chime(72, 0.30)
+	# v0.9.3 (A3): petals get a sound too - the burst was silent.
+	_sfx(node, "petal_rustle")
 	var ring := MeshInstance3D.new()
 	var rm := TorusMesh.new()
 	rm.inner_radius = 0.28

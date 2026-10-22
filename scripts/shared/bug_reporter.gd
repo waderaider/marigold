@@ -231,6 +231,18 @@ func set_report_url(url: String) -> void:
 	_report_url = url.strip_edges()
 
 
+## v0.9.3 (R2): the only host remote config may point reports at.
+const RELAY_HOST := "nexus-log-relay.wade-relay.workers.dev"
+
+
+static func _relay_host_ok(url: String) -> bool:
+	var h := url.trim_prefix("https://").trim_prefix("http://")
+	var slash := h.find("/")
+	if slash > 0:
+		h = h.substr(0, slash)
+	return h == RELAY_HOST
+
+
 ## Fetch version.json and read the "report_url" field (empty = disabled).
 func fetch_remote_config() -> void:
 	if _config_http == null:
@@ -246,9 +258,14 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
 	if data is Dictionary:
 		# Only a non-empty remote URL overrides the compiled-in fallback.
+		# v0.9.3 (R2): ...and only toward OUR relay host - crash reports
+		# carry device/session detail; a poisoned manifest must not be
+		# able to redirect them to a third party.
 		var url := str((data as Dictionary).get("report_url", "")).strip_edges()
-		if url != "":
+		if url != "" and _relay_host_ok(url):
 			set_report_url(url)
+		elif url != "":
+			push_warning("bug_reporter: remote report_url host rejected: " + url)
 		# Config just arrived: flush any reports saved while offline/local-only.
 		if _report_url != "":
 			retry_pending()

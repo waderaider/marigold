@@ -42,7 +42,7 @@ const ROOM := [0.45, 0.60, 0.25, 12.0]
 const FOREST := [0.50, 0.70, 0.20, 10.0]
 const STREET := [0.35, 0.80, 0.15, 5.0]
 
-const POOL_SIZE := 8          # positional one-shot voices (round-robin steal)
+const POOL_SIZE := 12         # positional one-shot voices (round-robin steal; 8 -> 12 in v0.9.3 so finale stacks don't steal story cues)
 const CLEAN_CUTOFF_HZ := 20000.0   # attenuation lowpass when path is clear
 const OCCLUDED_CUTOFF_HZ := 800.0  # muffled through walls
 const OCCLUDED_CUT_DB := -10.0     # extra volume drop when occluded
@@ -70,6 +70,7 @@ func _ready() -> void:
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer3D.new()
 		p.name = "SpatialVoice%d" % i
+		p.bus = "SFX" # v0.9.3: bus layout (pool was implicit Master)
 		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_SQUARE_DISTANCE
 		p.unit_size = 4.0
 		p.max_distance = 40.0
@@ -113,6 +114,7 @@ static func music_at(stream: AudioStream, pos: Vector3,
 	if instance == null or stream == null:
 		return null
 	var p := AudioStreamPlayer3D.new()
+	p.bus = "SFX" # v0.9.3: bus layout
 	p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 	p.unit_size = 30.0
 	p.max_distance = 60.0
@@ -168,7 +170,9 @@ func _play_voice(stream: AudioStream, pos: Vector3, pitch: float,
 	var p := _pool[_pool_idx]
 	_pool_idx = (_pool_idx + 1) % POOL_SIZE
 	p.stream = stream
-	p.pitch_scale = pitch
+	# v0.9.3: variation lives HERE so no caller can forget it
+	# (audio-design Pattern 3: never sample-identical repeats).
+	p.pitch_scale = pitch * randf_range(0.94, 1.06)
 	p.global_position = pos
 	if opts.get("max_distance", 0.0) as float > 0.0:
 		p.max_distance = opts["max_distance"]
