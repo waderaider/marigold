@@ -17,6 +17,7 @@ the per-version changelog files shipped with each build.
 | MARIGOLD (Godot, Quest + PC) | v0.9.1 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.9.1) |
 | MARIGOLD (Godot, Quest + PC) | v0.9.0 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.9.0) |
 | MARIGOLD (Godot, Quest + PC) | v0.8.0 | 2026-10-16 | [Release](https://github.com/waderaider/marigold/releases/tag/v0.8.0) |
+| MARIGOLD UE5 RTX Demo | ue5-demo-v0.8.0 | 2026-10-21 | [Release](https://github.com/waderaider/marigold/releases/tag/ue5-demo-v0.8.0) |
 | MARIGOLD UE5 RTX Demo | ue5-demo-v0.5.0 | 2026-10-20 | [Release](https://github.com/waderaider/marigold/releases/tag/ue5-demo-v0.5.0) |
 | MARIGOLD UE5 RTX Demo | ue5-demo-v0.4.0 | 2026-10-20 | [Release](https://github.com/waderaider/marigold/releases/tag/ue5-demo-v0.4.0) |
 | MarigoldGPUTest | gputest-v1.0.0 | 2026-10-19 | [Release](https://github.com/waderaider/marigold/releases/tag/gputest-v1.0.0) |
