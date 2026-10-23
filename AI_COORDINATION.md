@@ -56,6 +56,21 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 13:55 PDT (20:55 UTC)] CLAUDE — lane update: UE5 first + round-11 standing-fix re-verification
+
+- **Lane update (wade's direction, 13:46 PDT):** my verification work prioritizes the **UE5 game** over the Godot build. Godot gate re-runs stay available on request; my Godot baseline below stands as the reference point.
+- **Round-11 re-verification** (release `ue5-demo-v0.8.0`, `MarigoldDemo-v0.8.0-source.zip` asset 670351441, stamp `round11-2026-10-23T20:37:56Z`). Static checks only — wade's PC remains the compile gate; nothing here is a build claim:
+  - Zip hygiene: 605 entries, **0 pre-2000 timestamps** ✓
+  - Relay: all live files on `nexus-log-relay.wade-relay.workers.dev`; the only `brio-00c` string in the drop is a CHANGELOG sentence documenting its absence ✓
+  - RT: `r.RayTracing=True` stays in DefaultEngine.ini (wade's 09:09 decision — keeps the menu tiers visible) with `r.RayTracing.Enable=0` + EnableOnDemand at boot, and the round-9 first-boot fix intact at MarigoldRTXSettings.cpp:214-222 (explicit opt-in only, "stays OFF" hint logged) ✓
+  - `PlayDynamicForceFeedback` present at MarigoldPlayerPawn.cpp:1188 — the same verified call as round 8 ✓
+  - Modules: exactly one real IMPLEMENT_MODULE per plugin module (a grep count of 2 in LightMixer/QualityTiers/RTX is one macro + one comment citing the round-8 fix); game module IMPLEMENT_PRIMARY_GAME_MODULE present ✓
+  - Encodings: all 5 .ps1 carry the UTF-8 BOM (EF BB BF) — the round-9 watchdog fix survived; all 5 .bat are CRLF ✓
+  - Candle melt: MarigoldCandleMelt + Flames/Flicker/Inferno present and referenced in MarigoldFX ✓
+  - Updater: both updater scripts pinned to `ue5-demo-v0.8.0` ✓
+  - **Not verifiable from this drop:** the 55-line UE5 voice count — audio assets ship in ContentStaging, not the source zip. Nothing in the drop contradicts it.
+- **Verdict: round 11 preserves every standing fix I can check statically.** Next for me: read Hark's round-8 report in full and shadow the next round's drop the same way; gameplay-lane proposals only after that, audit-first per the board.
+
 ### [2026-10-23 13:26 PDT (20:26 UTC)] BRIO \u2014 Hark drop WIRED per wade's wholesale approval (11:35 PDT): round 10 shipped, Godot done, staging-pack upload blocked at GitHub
 - **Round 10 source SHIPPED** (release asset 670046337, stamp `round10-2026-10-23T18:43:46Z`, SHA-256 `62fe1b8af4fa25d726e4321c9f82e962438ee70a03a25561fef62f26e8dcd0d1`, fresh-download verified): integration patch applied to MarigoldBuilder \u2014 PATCH 1 (`w6_` prefix added to `IsAutoDressDenied`) + PATCH 2 (16 `w6_*` placements + unshadowed copal glow at the end of `BuildWave3Environment`, before the final log line). Anchors re-verified against the shipped round-9 source before editing (incl. the `Put` lambda's 5th `float Scale = 1.0f` arg); the round-10 diff vs round 9 is exactly the two hunks + stamp. Jacaranda check: **no** `M_JacarandaLeaf`/`M_JacarandaBloom` references anywhere in the C++/ini \u2014 nothing to rename-fix. Honest label: this C++ is source-only until wade's PC compiles it (first build of PATCH 1+2 happens on his next run).
 - **Godot counterparts DONE**: 15 same-name GLBs replaced with Hark's versions (artist alebrijes \u00d73 + chandelier + flower petal; ofrenda bowl/sahumador/salt dish/sugar skulls/tamales \u00d73/water glass; guitar). Headless gate: import exit 0, **11/11 chapters, 0 script errors** \u2014 nothing backed out. (The `candle_melt` get_meta probe ERRORs in the log are the pre-existing artifact Claude flagged at 13:20 on unmodified main \u2014 not a swap regression.) The other 43 drop GLBs have no Godot counterpart and stay UE5-only; no new Godot content added.
