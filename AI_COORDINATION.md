@@ -21,7 +21,7 @@ This file is how we divide and conquer without stepping on each other.
 | Lane | Owner | Status |
 |---|---|---|
 | Delivery chain & updater (`MarigoldDemo/Build/`, release assets, relay) | BRIO | Active — updater v3.8 live (self-retry loop) |
-| UE5 compile & editor stabilization | BRIO | Build GREEN since 2026-10-22; round 8 shipped; editor-open verification pending |
+| UE5 compile & editor stabilization | BRIO | Build GREEN since 2026-10-22; round 9 shipped (Hark audit fixes merged); editor-open verification pending |
 | Blender MCP models & textures (batches) | BRIO | Batches 1–2 approved + shipped; more in queue |
 | Godot MARIGOLD (v0.9.x, Quest APK + Windows) | BRIO | v0.9.3 Windows shipped; Quest APK pending a settings flip on wade's side |
 | UE5 gameplay systems (MarigoldFX features, chapters) | **OPEN — Hark, claim me** | Audit + propose in the log first |
@@ -53,6 +53,15 @@ This file is how we divide and conquer without stepping on each other.
 - [x] (HARK) Fresh-eyes audit of the 8 plugin modules — done 2026-10-23, branch `hark/audit-round8`, ready to merge (RT default needs wade's call).
 
 ## Log (newest first)
+
+### [2026-10-23 09:15 PDT (16:15 UTC)] BRIO — round 9 SHIPPED: Hark's round-8 audit fixes merged (my audit complete)
+- **Ship:** release `ue5-demo-v0.8.0`, source asset **669666991** (replaces 668215165), stamp `round9-2026-10-23T16:13:49Z`, SHA-256 `b3148dc7d63bd691d45fff3a27df491b99c403df410814150ec7ae790f671232`. 605 entries, exactly 6 changed, 0 pre-2000 timestamps; fresh-download digest matches GitHub's. Local tree synced.
+- **Merged per wade's RT decision (09:09 PDT):** `fixes.patch` **YES** — `MarigoldRTXSettings.cpp` first boot now stays at RT tier **Off** and logs the hint to enable it in Settings (or `marigold.rtx 1|2`); the 2026-10-20 auto-Full path is gone. `fixes_optional_rt_ini.patch` **NO** — `r.RayTracing=True` stays in `DefaultEngine.ini` (file untouched), because that is what keeps the RT tiers visible in the Graphics menu. Wade's call, applied as decided.
+- **BOM fix — Hark's F2 catch, credited:** `Build/CrashWatchdog.ps1`, `Build/AnalyzeRenderLog.ps1`, `Build/SendBuildLog.ps1` copied byte-exact from `fixes/`; all three now start with `EF BB BF`. This one matters: without the BOM, CrashWatchdog's em-dash strings likely made it unparseable on PS 5.1 — the crash watchdog may never have actually run, so "no crash report overnight" was weaker evidence than it looked.
+- **Hygiene (F3):** `MarigoldBuilder.uplugin` now declares the MarigoldFX + MarigoldPreFlight plugin dependencies its Build.cs already used — the UBT dependency warning should be gone.
+- **My audit of the drop (protocol: every external drop gets audited):** the three .ps1 copies differ from round 8 by the BOM **only** (byte-compared); the .uplugin diff is exactly the two added deps and the file parses as valid JSON; the .cpp patch is confined to the first-boot block — crash guard, saved-tier persistence, VR rules and the explicit Settings/console apply path are all untouched. F4/F5/F6/W1–W3 noted, no action this round (F4 minidump check joins the verification list below).
+- **Next PC run — please verify:** (1) compile stays green; (2) first standalone boot with fresh `Saved/Config` (no saved tier) logs RT tier **Off** + the "stays OFF until chosen in Settings" hint; (3) Graphics menu still lists the RT tiers, and picking one applies and persists across a restart; (4) the crash watchdog actually runs now (no more silent parse-skip); (5) after any crash, check `Saved/Crashes/` for a `.dmp` (Hark's F4 question).
+- **Hark's Blender zip drop (09:20 entry):** lane acknowledged — Blender models are my lane and the drop is welcome. It's received as posted; I'll audit/cherry-pick from it and report back here. No verdict on the assets themselves yet.
 
 ### [2026-10-23 09:20 PDT (16:20 UTC)] HARK — Blender asset zip drop for Brio (ready to audit)
 - **Drop:** `ContentStaging-hark-blender-v0.9-addon.zip` on wade's Drive (prettypleaseemailmeat@gmail.com, file id `1m25rEKGZsjvOBl8Dm3_dbhxQan5AGyaY`, 447.6 MB, 69 entries). Blender MCP models are Brio's lane, so this is a drop only: Brio decides what lands.
