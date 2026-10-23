@@ -1,0 +1,51 @@
+// ===== PATCH 1 — MarigoldSceneBuilder.cpp, IsAutoDressDenied() =====
+// Add w6_ to the explicit-placement prefixes so keyword auto-dressing never grabs these stems.
+	return DenyList.Contains(Stem) || Stem.StartsWith(TEXT("w3_")) || Stem.StartsWith(TEXT("w4_"))
+		|| Stem.StartsWith(TEXT("w5_")) || Stem.StartsWith(TEXT("w6_")) || Stem.StartsWith(TEXT("tja_"));
+
+// ===== PATCH 2 — MarigoldSceneBuilder_Wave3.cpp, end of BuildWave3Environment() =====
+// Insert just BEFORE the final Owner.Log(...) line (after MarigoldW5Plaza::Build(...)).
+// Reuses the existing `Put` lambda (HasW3 guard -> missing asset = silent skip) and `Front`.
+// Units cm; altar centre (0,-600), tier tops z = 45 / 85 / 125 (w3_altar_tiers), front = +Y.
+// Yaw offsets: 0 = faces south (+Y), 180 = north, -90 = east (+X), 90 = west (-X).
+	// ---------------- v0.9 w6_* Blender hero pass (REPORT_BLENDER_new.md) ----------------
+	{
+		const TCHAR* W6Folder = TEXT("Altar/W6");
+		// Tier 3 (z=125, 110x70 cm): carved photo stands at the back, sugar-skull trio in front of them.
+		Put(TEXT("w6_ofrenda_photo_stand_set"), FVector(0.0f, -612.0f, 125.0f), 0.0f, W6Folder);
+		Put(TEXT("w6_calavera_azucar_trio"),    FVector(0.0f, -578.0f, 125.0f), 0.0f, W6Folder);
+		// Tier 1 side wings (x = +-80..110 cm, z=45): tissue-paper bouquets, scaled to the 30 cm wing.
+		Put(TEXT("w6_tissue_flower_cluster"), FVector(-96.0f, -600.0f, 45.0f),  20.0f, W6Folder, 0.7f);
+		Put(TEXT("w6_tissue_flower_cluster"), FVector( 96.0f, -600.0f, 45.0f), -20.0f, W6Folder, 0.7f);
+		// Copal burner on the floor at the foot of the altar (smoke rises from the GLB node SOCKET_smoke, ~17.5 cm up).
+		AActor* Copal = Put(TEXT("w6_copal_burner_tripod"), FVector(0.0f, -495.0f, 0.0f), 0.0f, W6Folder);
+		// Papel picado across the altar front, above the marigold arch (arch crown ~152 cm).
+		Put(TEXT("w6_papel_picado_banner"), FVector(0.0f, -520.0f, 235.0f), 0.0f, W6Folder);
+		// Side offering table (w3_court_table at (-420,-600), top ~79 cm): bread basket + tin niche.
+		Put(TEXT("w6_ofrenda_bread_basket"),  FVector(-420.0f, -560.0f, 79.0f),  10.0f, W6Folder);
+		Put(TEXT("w6_hojalata_milagros_box"), FVector(-420.0f, -650.0f, 79.0f),   0.0f, W6Folder);
+		// Visitor's chair facing the altar, rebozo left on it.
+		Put(TEXT("w6_rebozo_chair"), FVector(330.0f, -390.0f, 0.0f), 160.0f, TEXT("Courtyard/W6"));
+		// West courtyard: cantera fountain mirrors the kiosko (1250,700); musician + mezcal beside it.
+		Put(TEXT("w6_cantera_fountain_basin"), FVector(-1150.0f, 560.0f, 0.0f),  22.5f, TEXT("Courtyard/W6"));
+		Put(TEXT("w6_skeleton_guitarist"),     FVector(-880.0f, 330.0f, 0.0f),  -40.0f, TEXT("Courtyard/W6"));
+		Put(TEXT("w6_mezcal_jug_set"),         FVector(-820.0f, 420.0f, 0.0f),  -25.0f, TEXT("Courtyard/W6"));
+		// Saltillo + petal side path: 4 chained 2 m sections from the main path (x=0) west toward the fountain.
+		for (int32 i = 0; i < 4; ++i)
+		{
+			Put(TEXT("w6_petal_tile_path"), FVector(-160.0f - i * 200.0f, 420.0f, 0.3f), 0.0f, TEXT("Courtyard/W6/Path"));
+		}
+		// Warm unshadowed glow off the copal embers (shadow budget stays with the candles).
+		if (Copal)
+		{
+			UPointLightComponent* PL = NewObject<UPointLightComponent>(Copal, TEXT("W6CopalGlow"));
+			PL->SetupAttachment(Copal->GetRootComponent());
+			PL->SetRelativeLocation(FVector(0, 0, 17.0f) / FMath::Max(Copal->GetActorScale3D().Z, KINDA_SMALL_NUMBER));
+			PL->SetIntensity(120.0f);
+			PL->SetAttenuationRadius(140.0f);
+			PL->SetLightColor(FLinearColor(1.0f, 0.45f, 0.15f));
+			PL->SetCastShadows(false);
+			Copal->AddInstanceComponent(PL);
+			PL->RegisterComponent();
+		}
+	}
