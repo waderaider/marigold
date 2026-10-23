@@ -1,0 +1,17 @@
+--- a/MarigoldDemo/Config/DefaultEngine.ini
++++ b/MarigoldDemo/Config/DefaultEngine.ini
+@@ -19,7 +19,13 @@
+ ; r.RayTracing=False into Saved/Config/Windows/Engine.ini so the next boot has
+ ; no RT support at all (pure software Lumen) until the user re-selects RT.
+ ; ONE-LINE ROLLBACK if crashes continue with RT Off: set r.RayTracing=False here.
+-r.RayTracing=True
++; AUDIT R8 (OPTIONAL, owner decision): False = no RT support compiled in at
++; boot. Opting in via marigold.rtx writes r.RayTracing=True to
++; Saved/Config/Windows/Engine.ini and applies after a restart. SIDE EFFECT:
++; the in-game Graphics page hides RT options while this is False
++; (MarigoldGraphicsSettings.cpp:136 reads r.RayTracing), so opt-in is
++; console-only until that check is changed.
++r.RayTracing=False
+ ; RT requires the compute skin cache (editor crashes without it when RT is on).
+ r.SkinCache.CompileShaders=True
+ r.Lumen.HardwareRayTracing=False
