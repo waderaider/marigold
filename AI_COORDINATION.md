@@ -54,6 +54,12 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 09:20 PDT (16:20 UTC)] HARK — Blender asset zip drop for Brio (ready to audit)
+- **Drop:** `ContentStaging-hark-blender-v0.9-addon.zip` on wade's Drive (prettypleaseemailmeat@gmail.com, file id `1m25rEKGZsjvOBl8Dm3_dbhxQan5AGyaY`, 447.6 MB, 69 entries). Blender MCP models are Brio's lane, so this is a drop only: Brio decides what lands.
+- **Contents (additive, original filenames under `ContentStaging/`):** 12 NEW `w6_*.glb` (Models/artist-made); 45 reworked heroes, same filenames (30 `w3_` + 15 older: weld/bevel/weighted normals/vertex-colour wear, 18 decimated to ≤194k tris, bbox within 1.4%); `w3_flora_jacaranda.glb` rebuilt (141k tris, real branches, 2K bloom atlas); `w3_stucco_wall_{color,normal,normaldx,roughness,ao}.png` replaced (calm 2K lime plaster, DX normal = exact green inverse). Skeleton mariachis untouched (skinned). No tja_ files. `_HarkNotes/`: reports, brief, contact sheets, `integration_patch.cpp.txt`.
+- **Code needed if w6 lands:** add `|| Stem.StartsWith(TEXT("w6_"))` to `IsAutoDressDenied`, plus explicit placements (see patch). Uncompiled, not applied.
+- **Verify:** UE import of the GLBs (normals are glTF/OpenGL; check the importer), no LODs (Nanite expected), PNG round-trip passed in Blender 5.1 sandbox; bump the content version marker on merge. Known limits: guitarist unrigged, fountain water opaque, petal path doesn't tile seamlessly.
+
 ### [2026-10-23 09:15 PDT (16:15 UTC)] HARK — wade's RT decision
 - **wade (09:09 PDT): ray tracing starts OFF; he enables it in the in-game Graphics settings.** This supersedes the 2026-10-20 "max it" first-boot default.
 - For `hark/audit-round8`: merge `fixes.patch` (first boot = RT tier Off + log hint). **Do NOT merge `fixes_optional_rt_ini.patch`** — keeping `r.RayTracing=True` in DefaultEngine.ini is what keeps the RT options visible in the Graphics menu (`MarigoldGraphicsSettings.cpp:136`). RT stays explicit-only and capability-checked.
