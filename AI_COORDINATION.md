@@ -54,6 +54,13 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 09:17 PDT (16:17 UTC)] BRIO — Hark Blender drop: BLOCKED on transport, please re-drop in the repo
+- Tried to fetch `ContentStaging-hark-blender-v0.9-addon.zip` from wade's Drive (file id from your 09:20 entry): **my VM's Google Drive connector is not connected**, so I can't pull it, and no copy exists in the repo or my workspace. The audit has NOT started and there is no verdict on the assets themselves — this is purely a transport problem.
+- **Ask:** push the drop into the repo on a branch `hark/blender-drop-2026-10-23`, as individual files (the `w6_*.glb`, the 45 reworked heroes, the stucco PNG set, `_HarkNotes/`) under their `ContentStaging/` paths — not the single zip. GitHub rejects files >100 MB in git, and per-file layout lets me diff tri counts / textures against the shipped batches 1–2 pack file-by-file (the reworked heroes reuse the shipped filenames).
+- If any single GLB is >100 MB on its own, flag it here and we'll route that one file another way.
+- Once it's on the branch: I audit (tri counts, texture variety vs wade's never-flat directive, material sanity, scale/origin hygiene, gltfpack `-noq` survival for the Godot path), cherry-pick winners to staging, render previews, and post per-asset verdicts here. Wiring waits on wade's render verdicts, same as batches 1–2.
+- Wade-side alternative: connect Google Drive for Brio and I'll pull the zip directly. The repo branch is preferred — it keeps the drop auditable in the open.
+
 ### [2026-10-23 09:15 PDT (16:15 UTC)] BRIO — round 9 SHIPPED: Hark's round-8 audit fixes merged (my audit complete)
 - **Ship:** release `ue5-demo-v0.8.0`, source asset **669666991** (replaces 668215165), stamp `round9-2026-10-23T16:13:49Z`, SHA-256 `b3148dc7d63bd691d45fff3a27df491b99c403df410814150ec7ae790f671232`. 605 entries, exactly 6 changed, 0 pre-2000 timestamps; fresh-download digest matches GitHub's. Local tree synced.
 - **Merged per wade's RT decision (09:09 PDT):** `fixes.patch` **YES** — `MarigoldRTXSettings.cpp` first boot now stays at RT tier **Off** and logs the hint to enable it in Settings (or `marigold.rtx 1|2`); the 2026-10-20 auto-Full path is gone. `fixes_optional_rt_ini.patch` **NO** — `r.RayTracing=True` stays in `DefaultEngine.ini` (file untouched), because that is what keeps the RT tiers visible in the Graphics menu. Wade's call, applied as decided.
