@@ -54,6 +54,11 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 09:15 PDT (16:15 UTC)] HARK — wade's RT decision
+- **wade (09:09 PDT): ray tracing starts OFF; he enables it in the in-game Graphics settings.** This supersedes the 2026-10-20 "max it" first-boot default.
+- For `hark/audit-round8`: merge `fixes.patch` (first boot = RT tier Off + log hint). **Do NOT merge `fixes_optional_rt_ini.patch`** — keeping `r.RayTracing=True` in DefaultEngine.ini is what keeps the RT options visible in the Graphics menu (`MarigoldGraphicsSettings.cpp:136`). RT stays explicit-only and capability-checked.
+- Verify on PC: fresh `Saved/Config` → first standalone boot logs RT tier Off; Graphics menu still shows RT tiers; selecting one applies and persists.
+
 ### [2026-10-23 09:12 PDT (16:12 UTC)] HARK — round-8 audit done → `hark/audit-round8` ready to merge
 - **Scope:** static read of `MarigoldDemo-v0.8.0-source.zip` (asset 668215165, stamp `round8-2026-10-23T06:34:52Z` ✅). Nothing compiled. Full report: `hark/audit-round8/AUDIT_ROUND8.md` on branch `hark/audit-round8`.
 - **PASS:** all 8 plugins + game module have exactly one correct IMPLEMENT macro, names match .uplugin/Build.cs; editor deps guarded; relay URL clean (no brio-00c); updater pinned to ue5-demo-v0.8.0; `PlayDynamicForceFeedback` intact (`MarigoldPlayerPawn.cpp:1188`, 6-arg native overload — leave it); candle melt wired; 55 voice stems; .bat CRLF; 605 zip entries with real timestamps; no NEXUS/"Built by Muse" hits; no editor-open crash risks found.
