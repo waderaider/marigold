@@ -1,0 +1,61 @@
+--- a/MarigoldDemo/Plugins/MarigoldRTX/Source/MarigoldRTX/Private/MarigoldRTXSettings.cpp
++++ b/MarigoldDemo/Plugins/MarigoldRTX/Source/MarigoldRTX/Private/MarigoldRTXSettings.cpp
+@@ -210,20 +210,16 @@
+ 	int32 Tier = FMath::Clamp(Saved, 0, 2);
+ 	if (!bHasSaved)
+ 	{
+-		// FIRST BOOT. Owner directive (2026-10-20): flat PC + RTX 40/50-series
+-		// defaults to Full — safe only because the crash guard above reverts
+-		// it permanently after any unclean exit. VR stays Off.
++		// FIRST BOOT. Standing rule (MERGE_PROTOCOL.md / AI_COORDINATION.md,
++		// 2026-10-23): RT tiers are explicit opt-in only — never auto-enabled
++		// at startup on D3D12 (887A002B crash history on the RTX 5070 Ti).
++		// The 2026-10-20 "flat PC + RTX 40/50 defaults to Full" path is
++		// replaced by a log hint; the user opts in via Settings or marigold.rtx.
+ 		Tier = 0;
+ 		if (!bVR && !bLockout && bUsable && IsStrongRTXAdapter())
+ 		{
+-			Tier = 2;
+-			if (GConfig)
+-			{
+-				GConfig->SetBool(RTXConfigSection, RTXUserChosenKey, false, GGameIni);
+-			}
+-			SaveRequestedTierStatic(Tier);
+-			UE_LOG(LogMarigoldRTX, Warning,
+-				TEXT("First boot on '%s' (flat PC): ray tracing defaulted to FULL. Crash guard armed — any unclean exit reverts it to Off permanently."),
++			UE_LOG(LogMarigoldRTX, Log,
++				TEXT("First boot on '%s' (flat PC): ray tracing is available but stays OFF until chosen in Settings (or 'marigold.rtx 1|2')."),
+ 				*GRHIAdapterName);
+ 		}
+ 	}
+--- a/MarigoldDemo/Build/AnalyzeRenderLog.ps1
++++ b/MarigoldDemo/Build/AnalyzeRenderLog.ps1
+@@ -1,4 +1,4 @@
+-# AnalyzeRenderLog.ps1 — MARIGOLD UE5 Demo render-log analyzer (Expert #6: Render Error Detector)
++﻿# AnalyzeRenderLog.ps1 — MARIGOLD UE5 Demo render-log analyzer (Expert #6: Render Error Detector)
+ # Scans a UE editor/build log for RENDER-specific errors and warnings, categorizes
+ # them, dedupes repeats, and emits prioritized JSON to stdout.
+ #
+--- a/MarigoldDemo/Build/CrashWatchdog.ps1
++++ b/MarigoldDemo/Build/CrashWatchdog.ps1
+@@ -1,4 +1,4 @@
+-# CrashWatchdog.ps1 — hard-crash watchdog for the MARIGOLD UE5 demo.
++﻿# CrashWatchdog.ps1 — hard-crash watchdog for the MARIGOLD UE5 demo.
+ #
+ # Called by MarigoldUpdater.ps1 (and UpdateMarigold.ps1) BEFORE the download /
+ # extract step, e.g.:
+--- a/MarigoldDemo/Build/SendBuildLog.ps1
++++ b/MarigoldDemo/Build/SendBuildLog.ps1
+@@ -1,4 +1,4 @@
+-# SendBuildLog.ps1 -- called by BuildDemo.bat after the UBT build finishes.
++﻿# SendBuildLog.ps1 -- called by BuildDemo.bat after the UBT build finishes.
+ # Sends TWO reports to Brio's relay for auto-diagnosis:
+ #   kind="build-log"      -- error summary (legacy format, preserved)
+ #   kind="build-log-full" -- FULL build log: MSVC output, UHT output, shader
+--- a/MarigoldDemo/Plugins/MarigoldBuilder/MarigoldBuilder.uplugin
++++ b/MarigoldDemo/Plugins/MarigoldBuilder/MarigoldBuilder.uplugin
+@@ -1 +1 @@
+-{"CanContainContent": false, "Category": "Marigold", "CreatedBy": "Muse", "Description": "One-click content builder for the MARIGOLD UE5 RTX tech demo (Chapter 1: Ofrenda Night). Imports staged models/audio, builds art-bible materials, constructs the OfrendaNight map, wires 25 candle lights, and configures Lumen/MegaLights/DLSS render settings. All designs original, on authentic Dia de Muertos tradition.", "EngineVersion": "5.7.0", "FileVersion": 3, "FriendlyName": "MarigoldBuilder", "Installed": false, "IsBetaVersion": false, "IsExperimentalVersion": false, "Modules": [{"LoadingPhase": "PostEngineInit", "Name": "MarigoldBuilder", "Type": "Editor"}], "Plugins": [{"Enabled": true, "Name": "ProceduralMeshComponent"}], "Version": 1, "VersionName": "1.0.0"}
+\ No newline at end of file
++{"CanContainContent": false, "Category": "Marigold", "CreatedBy": "Muse", "Description": "One-click content builder for the MARIGOLD UE5 RTX tech demo (Chapter 1: Ofrenda Night). Imports staged models/audio, builds art-bible materials, constructs the OfrendaNight map, wires 25 candle lights, and configures Lumen/MegaLights/DLSS render settings. All designs original, on authentic Dia de Muertos tradition.", "EngineVersion": "5.7.0", "FileVersion": 3, "FriendlyName": "MarigoldBuilder", "Installed": false, "IsBetaVersion": false, "IsExperimentalVersion": false, "Modules": [{"LoadingPhase": "PostEngineInit", "Name": "MarigoldBuilder", "Type": "Editor"}], "Plugins": [{"Enabled": true, "Name": "ProceduralMeshComponent"}, {"Enabled": true, "Name": "MarigoldFX"}, {"Enabled": true, "Name": "MarigoldPreFlight"}], "Version": 1, "VersionName": "1.0.0"}
+\ No newline at end of file
