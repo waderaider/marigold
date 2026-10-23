@@ -25,7 +25,7 @@ This file is how we divide and conquer without stepping on each other.
 | Blender MCP models & textures (batches) | BRIO | Batches 1–2 approved + shipped; more in queue |
 | Godot MARIGOLD (v0.9.x, Quest APK + Windows) | BRIO | v0.9.3 Windows shipped; Quest APK pending a settings flip on wade's side |
 | UE5 gameplay systems (MarigoldFX features, chapters) | **OPEN — Hark, claim me** | Audit + propose in the log first |
-| Code audit passes (standing-fix checklist, fresh eyes) | **HARK** | Claimed 2026-10-23 — 8-module audit of round-8 source in progress (read-only) |
+| Code audit passes (standing-fix checklist, fresh eyes) | **HARK** | Round-8 audit done → `hark/audit-round8` ready to merge |
 | QA / test plans / profiling | **HARK** | Claimed 2026-10-23 — writing the editor-open + Ofrenda walk checklist next |
 
 ## How compiling works (both AIs compile through this)
@@ -50,9 +50,18 @@ This file is how we divide and conquer without stepping on each other.
 - [ ] (BRIO) Blender batch 3: more Guanajuato hero models + varied surface textures (wade's standing directive — never flat single-color surfaces).
 - [ ] (HARK drafts checklist / wade runs) First editor-open QA pass once the editor is verified up: click "Build Marigold Demo", walk the Ofrenda chapter checklist, post results here.
 - [x] (HARK) Hark intro: lanes claimed, plan posted (2026-10-23).
-- [ ] (HARK) Fresh-eyes audit of the 8 plugin modules against the standing-fix checklist — in progress.
+- [x] (HARK) Fresh-eyes audit of the 8 plugin modules — done 2026-10-23, branch `hark/audit-round8`, ready to merge (RT default needs wade's call).
 
 ## Log (newest first)
+
+### [2026-10-23 09:12 PDT (16:12 UTC)] HARK — round-8 audit done → `hark/audit-round8` ready to merge
+- **Scope:** static read of `MarigoldDemo-v0.8.0-source.zip` (asset 668215165, stamp `round8-2026-10-23T06:34:52Z` ✅). Nothing compiled. Full report: `hark/audit-round8/AUDIT_ROUND8.md` on branch `hark/audit-round8`.
+- **PASS:** all 8 plugins + game module have exactly one correct IMPLEMENT macro, names match .uplugin/Build.cs; editor deps guarded; relay URL clean (no brio-00c); updater pinned to ue5-demo-v0.8.0; `PlayDynamicForceFeedback` intact (`MarigoldPlayerPawn.cpp:1188`, 6-arg native overload — leave it); candle melt wired; 55 voice stems; .bat CRLF; 605 zip entries with real timestamps; no NEXUS/"Built by Muse" hits; no editor-open crash risks found.
+- **FAIL 1 — RT (needs wade's call):** `MarigoldRTXSettings.cpp:211-229` auto-picks FULL RT tier (incl. Lumen HWRT, the 887A002B config) on first flat-PC boot with RTX 40/50 on D3D12; `DefaultEngine.ini:22` `r.RayTracing=True`. Contradicts "explicit-only", but code cites wade's 2026-10-20 "max it". Patch keeps first boot at tier Off + log hint; optional separate ini patch (hides RT in Graphics menu, so not recommended alone).
+- **FAIL 2 — .ps1 BOM:** `CrashWatchdog.ps1`, `AnalyzeRenderLog.ps1`, `SendBuildLog.ps1` lack BOM; watchdog has em-dashes in strings (175/184/187) → likely never parses on PS 5.1, masked as "Watchdog skipped" (`MarigoldUpdater.ps1:236-241`); v3.8 `UpdateMarigold.ps1` doesn't call it. So "no crash overnight" is weak evidence. These are in `Build/` (Brio's lane) — patched copies offered, not applied.
+- **Hygiene:** `MarigoldBuilder.uplugin` missing MarigoldFX + MarigoldPreFlight plugin deps (UBT warning). **Check on PC:** `MarigoldCrashReporter.cpp:692` `SetCrashHandler` may suppress engine minidumps — look for `.dmp` in `Saved/Crashes/` after a crash.
+- **To verify after merge:** compile GREEN; first standalone boot logs RT tier Off; `.ps1` first bytes EF BB BF; watchdog runs; no UBT plugin-dep warning. Copy `.ps1` from `fixes/` directly (patch tools can drop BOM).
+- **Next:** editor-open + Ofrenda QA checklist on `hark/qa`. **Need:** wade — RT first-boot default: Off (rule) or FULL ("max it")?
 
 ### [2026-10-23 08:58 PDT (15:58 UTC)] HARK — intro, lanes claimed, plan
 - **Who:** Hark, second AI on MARIGOLD (Wade's request). I work through the GitHub connector as `Waderaid`. Read MERGE_PROTOCOL.md and this board first; I'll follow both.
