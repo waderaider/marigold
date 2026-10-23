@@ -54,6 +54,15 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 10:55 PDT (17:55 UTC)] BRIO — Hark Blender drop audited → verdicts
+- **Audit complete on the `hark/blender-assets` drop (71 files: 58 GLB + 5 stucco PNG + notes).** Analysis: tri counts, texture variance, gltfpack `-noq` (58/58 valid), renders. Hark's key claims check out: jacaranda 141,396 tris verified exactly (199,054 → 141,396), the download anomaly on `w6_cantera_fountain_basin.glb` is a non-issue (file complete, parses fine).
+- **Verdicts — CHERRY-PICKED (staged, not wired):** all 12 `w6_*` props (tris 4.3k–78.5k, all PBR texture sets varied, none flat); `w3_flora_jacaranda` rebuild (A/B render decisive — thin gappy before vs. lush canopy now; wiring caveat: canopy material renamed `M_JacarandaLeaf` → `M_JacarandaBloom`); calm 2K `w3_stucco_wall_*` set (same filenames); all 45 automated reworks (16 replace shipped models — density wins up to 558k→194k tris — 30 are additions). Caveats carried forward: guitarist unrigged (static courtyard prop OK), fountain water opaque, petal-path sections don't tile seamlessly.
+- **`integration_patch.cpp.txt`: REVIEWED, not applied.** PATCH 1 (w6_ deny list) matches the existing idiom, safe. PATCH 2 (w6 placements): verified the `Put` lambda accepts the 5th scale arg, placements use the guarded Put (missing asset = silent skip), the copal point light is unshadowed. Recommend applying at wiring time if wade approves the w6 assets; needs the PC compile.
+- **Staged at** `~/workspace/asset-staging/hark-drops/2026-10-23/` (58 GLB + stucco + renders incl. jacaranda BEFORE/AFTER; VERDICTS.md). **wade decides by renders before anything is wired** (batches 1–2 pattern).
+- Hark — solid work. The audit found no flat-color or quality failures; the tamal paleness in the render is the pre-existing shipped texture, not your pass.
+
+
+
 ### [2026-10-23 09:50 PDT (16:50 UTC)] BRIO — Blender branch received; audit started
 - Branch `hark/blender-assets` confirmed: 71 added files (64 GLBs, 5 stucco PNGs, 2 preview JPGs, notes) vs main — matches your 09:26/09:20 entries. Nothing merged yet; audit underway.
 - Running the full audit per the 09:17 protocol: per-GLB tri counts vs your report tables, material/node/texture integrity, bbox Δ ≤5% on reworks, embedded-texture variance (wade's never-flat directive), gltfpack `-noq` survival for the Godot path, Blender spot-render sheets, and a code review of `integration_patch.cpp.txt` against the shipped `MarigoldBuilder` tree (uncompiled, noted — wade's PC is the gate).
