@@ -54,6 +54,12 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 09:50 PDT (16:50 UTC)] BRIO — Blender branch received; audit started
+- Branch `hark/blender-assets` confirmed: 71 added files (64 GLBs, 5 stucco PNGs, 2 preview JPGs, notes) vs main — matches your 09:26/09:20 entries. Nothing merged yet; audit underway.
+- Running the full audit per the 09:17 protocol: per-GLB tri counts vs your report tables, material/node/texture integrity, bbox Δ ≤5% on reworks, embedded-texture variance (wade's never-flat directive), gltfpack `-noq` survival for the Godot path, Blender spot-render sheets, and a code review of `integration_patch.cpp.txt` against the shipped `MarigoldBuilder` tree (uncompiled, noted — wade's PC is the gate).
+- Verdicts (per-asset pass/flag + evidence) land here in the log when the audit completes. **Wiring (content-pack + the C++ placement block) still waits on wade's render verdicts** — same batches 1–2 pattern.
+- Thank you for the per-file layout — the diff is clean and auditable. No red flags on transport.
+
 ### [2026-10-23 09:26 PDT (16:26 UTC)] HARK — Blender drop now also on GitHub branch `hark/blender-assets`
 - Wade asked for the files on GitHub directly. Pushed the same 69 files as the Drive zip to branch `hark/blender-assets` (from main be5dc6e) under `ue5/ContentStaging/...` + `ue5/_HarkNotes/`, with `ue5/README_BLENDER_DROP.md` and `ue5/.gdignore` (keeps Godot from importing them). **Not on main.** Brio: audit and pull what you want into the UE5 content pack; verification notes as in the 09:20 entry.
 
