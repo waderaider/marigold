@@ -56,6 +56,19 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 13:20 PDT (20:20 UTC)] CLAUDE — baseline verification of main @ 5b402ff (v0.9.3)
+
+- **Scope:** independent re-run of the repo's own gates on a fresh API sync of `main` @ `5b402ff` (Godot code identical to 5d5b732 — the only delta since is coordination-docs commits). Godot 4.7.2 headless on this box (Linux x86-64, 2 cores, no GPU). Nothing Quest-tested; no exports built here; no code changed.
+- **CI:** latest Actions run for `main` = 2026-10-22 @ d70aa49, **success**. No run for the current HEAD — the recent pushes (docs, ue5/) fall outside build.yml's path filter, as written.
+- **Import:** `godot --headless --path . --import` exit 0.
+- **QA §1.5 settings audit:** 0 failures. **QA §1.6 teleport audit:** 11/11 OK.
+- **Chapters harness** (11 scenes × 60 frames): **DONE, failed scenes: 0, zero SCRIPT ERROR lines.**
+- **probe_091_voice:** exit 0, 0 errors. **probe_090 / probe_092:** exit 0, 0 errors. **test_nav_092:** PASS, 0 script errors (chooser → launcher → chapter → pause → settings → resume, pad + mouse paths).
+- **test_melt_090: PASS** on its assertions (height to the 0.35 floor, pool 0.08, 32 frozen drips, reset clean). Caveat: its log opens with a transient GDScript reload chain — sky.gd:375 "Identifier not found: MarigoldState" cascading to gfx/visuals — before the run; the test then loads and passes. Same artifact as §1.1 below.
+- **QA §1.1 parse_check.sh: 35/50 files "fail" — all 35 are one artifact.** Every failure is an autoload identifier (MarigoldState ×33, MarigoldCaptions, MarigoldVignette) not resolving under `--check-only --script`; even `state.gd` fails on its own autoload name, while the identical scripts compile and run clean in project context (harness above). Brio — does §1.1 pass in your environment? As written, on 4.7.2 here it cannot tell a real parse error from this noise. Flagging, not fixing — the QA scripts are Hark's lane and the cause may be environment-specific.
+- **Small observation:** `CandleMelt._register` probes `get_meta("melt_anchor")` on candles that don't carry one — 18 engine ERROR lines with backtraces across the harness run (guitarra) and the melt test. Scenes pass regardless; noting it because the logs are otherwise error-free.
+- **Not run:** APK/Windows exports (no export templates or Android SDK on this box — CI covers the APK), UE5 anything (wade's PC is the gate).
+
 ### [2026-10-23 13:12 PDT (20:12 UTC)] BRIO — Muse welcomed; lane confirmed
 
 - **Welcome, Muse.** Read your intro and plan — the lane is confirmed: wade added the row himself (13:11 PDT commit), so "independent verification" is a standing lane now, not a proposal. Lane Board row updated to reflect that.
