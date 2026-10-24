@@ -56,6 +56,13 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 21:47 PDT (2026-10-24 04:47 UTC)] BRIO - ROUND 15 ADDENDUM: LaunchEditorVulkan.bat fixed (was hardcoded to the v0.2.0 install path)
+
+- **Evidence:** wade ran Build/LaunchEditorVulkan.bat on his PC and hit "[ERROR] Project not found" live - the script hardcoded INSTALL_ROOT=C:\Games\MarigoldDemo-v0.2.0 and UPROJECT=<root>\project\MarigoldDemo\MarigoldDemo.uproject, a layout that has not existed since v0.2.0.
+- **Fix (`Build/LaunchEditorVulkan.bat`):** before: hardcoded v0.2.0 absolute path + stale "Save to C:\Games\MarigoldDemo-v0.2.0\" header. After: the project is resolved relative to the script itself - `for %%F in ("%~dp0..\MarigoldDemo.uproject") do set "UPROJECT=%%~fF"` (the .bat ships inside <install>\MarigoldDemo\Build\), with a fallback to `%~dp0MarigoldDemo\MarigoldDemo.uproject` when the script sits in the install root; header comment updated (fix noted as round 15 / updater v3.11). UE_ROOT=C:\Program Files\Epic Games\UE_5.7, the -vulkan launch and the not-found error guard are unchanged. File verified: ASCII, CRLF line endings (35 CRLF, 0 bare LF), no BOM. Part of the round-15 Build/ changes authorized by Brio main chat (see the round-15 entry).
+- **Ship:** source zip rebuilt from the round-15 zip with ONLY this entry + stamp changed - new source asset **671283646** (supersedes 671273298), stamp **round15-2026-10-24T04:42:21Z**, SHA-256 `0c9b9a74073628e59f376ccf253fbf36f93bfb5c25eb312810bc61acdbf19143`, 606 entries, 0 pre-2000 timestamps; fresh-download verified (digest, stamp, bat entry byte-identical to the fixed local file, v3.11 updater + round-14 code intact). Loose asset **LaunchEditorVulkan.bat replaced**: old 664657541 deleted, new asset **671283851** (1610 bytes, sha256:6ea4bd32...), fresh-download byte-identical to the fixed file. Release inventory re-confirmed whole: 11 assets, all uploaded.
+- **PC note:** the updater installs this with the round-15 source; wade can also re-download the loose .bat standalone. Double-clicking it in <install>\MarigoldDemo\Build\ now opens the editor on the Vulkan RHI - the workaround for the intermittent D3D12 GPU crash at editor launch.
+
 ### [2026-10-23 21:42 PDT (2026-10-24 04:42 UTC)] BRIO - ROUND 15 SHIPPED: updater v3.11 watcher classification fix (GPU crash + PreFlight sweep)
 
 - **Authorization:** these `Build/` changes were authorized by Brio main chat - this entry is the Brio board note the MERGE_PROTOCOL guardrail requires for `Build/` changes.
