@@ -56,6 +56,17 @@ This file is how we divide and conquer without stepping on each other.
 
 ## Log (newest first)
 
+### [2026-10-23 21:49 PDT (2026-10-24 04:49 UTC)] BRIO - ROUND 16 SHIPPED: updater v3.12 auto-delivers the fixed Vulkan launcher to the install root
+
+**Wade's order (2026-10-23 21:44 PDT):** he cannot type the long `-vulkan` command line - the updater itself must place the fixed launcher where he double-clicks. **The Build/ changes in this round are authorized by Brio main chat** (MERGE_PROTOCOL guardrail) on the strength of that order.
+
+- **Build/UpdateMarigold.ps1 -> v3.12:** Step 2 now downloads the loose `LaunchEditorVulkan.bat` release asset FRESH on every run (Get-FileRobust, curl-first - same pattern as the script's other downloads) and overwrites `C:\Games\MarigoldDemo-v0.8.0\LaunchEditorVulkan.bat`. Rounds <=15 fetched it only when missing, which stranded wade's broken v0.2.0-era copy. Fail-soft: a failed refresh only logs a warning, never blocks the build. (FixGpuTimeout.reg still fetched only when missing.)
+- **Build/LaunchEditorVulkan.bat:** project resolution tries three locations relative to the script, first existing path wins: (a) `%~dp0..\MarigoldDemo.uproject` (bat in `<project>\Build\`), (b) `%~dp0MarigoldDemo\MarigoldDemo.uproject` (bat at install root), (c) `%~dp0project\MarigoldDemo\MarigoldDemo.uproject` (legacy layout). UE_ROOT unchanged (`C:\Program Files\Epic Games\UE_5.7`); the error path now lists all three candidates.
+- **Assets (release ue5-demo-v0.8.0):** source zip **671296035** (5,516,630 B, SHA-256 `ab7c305826b0f87b4e07c0375650013eaf342033057e0984370886717838adcc`), stamp **round16-2026-10-24T04:47:55Z**, 606 entries, differs from the round-15 zip in exactly 3 entries (the two Build files + stamp), 0 pre-2000 timestamps; loose UpdateMarigold.ps1 **671295311** (45,337 B, SHA-256 `0a159bc5f51d1eb2e7a25f8da67ecde77567b6c70b0ac0e9a0829fa1648547ed`); loose LaunchEditorVulkan.bat **671295758** (2,372 B, SHA-256 `e6626a93d69e34b05eb1f786b5b0cd9de14a01fc5d1a6a3f4f851caa292a5db7`).
+- **Fresh-download verification:** all three assets re-downloaded post-upload; digests match local; the .bat inside the zip is byte-identical to the loose asset (three-way local == zip == loose holds for both changed files); .bat CRLF + ASCII, .ps1 UTF-8 with BOM (PS 5.1-safe); full release inventory present (11 assets incl. both staging packs + both markers).
+- **No gameplay/plugin code changes this round.** Source-only until PC compile, as always.
+- **PC verification list:** wade runs UpdateMarigold -> (1) banner shows updater v3.12 and step 2 prints "Refreshed LaunchEditorVulkan.bat in install root."; (2) `C:\Games\MarigoldDemo-v0.8.0\LaunchEditorVulkan.bat` is the new copy; (3) double-clicking it opens the editor on Vulkan (sidesteps the intermittent D3D12 887A002B GPU crash); (4) build stays green on round-16 source.
+
 ### [2026-10-23 21:47 PDT (2026-10-24 04:47 UTC)] BRIO - ROUND 15 ADDENDUM: LaunchEditorVulkan.bat fixed (was hardcoded to the v0.2.0 install path)
 
 - **Evidence:** wade ran Build/LaunchEditorVulkan.bat on his PC and hit "[ERROR] Project not found" live - the script hardcoded INSTALL_ROOT=C:\Games\MarigoldDemo-v0.2.0 and UPROJECT=<root>\project\MarigoldDemo\MarigoldDemo.uproject, a layout that has not existed since v0.2.0.
